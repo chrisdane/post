@@ -213,7 +213,9 @@ user_set <- function(varname) exists(varname, where=globalenv(), inherits=F)
 # collide exactly this way ("pathin"/"pathout", "mode"/"mode_args").
 # `%in% names(job)` is a plain string equality check with no such fallback,
 # so gate every job field access through this.
-job_get <- function(job, field, default=NULL) if (field %in% names(job)) job[[field]] else default
+# explicit NULL counts as "not given" (falls through to `default`), not a
+# present-but-NULL value overriding it
+job_get <- function(job, field, default=NULL) if (field %in% names(job) && !is.null(job[[field]])) job[[field]] else default
 if (!user_set("dry")) dry <- F # if T: only print what would be run
 if (!user_set("force")) force <- F # if T: redo even if fout already exists
 if (!user_set("clean")) clean <- T # if T: remove temporary chunk/select files

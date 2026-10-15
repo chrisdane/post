@@ -10,20 +10,33 @@ hostname <- Sys.info()["nodename"]
 if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
     pathpost <- c("/work/ab1095/a270073/post", "/work/ba1103/a270073/post") # searched in this order; new derived files go to the 1st
     pathplot <- "/work/ab1095/a270073/plots"
+} else if (grepl("albedo|^prod-[0-9]+$", hostname)) { # albedo; login nodes: albedo1/2; compute nodes: prod-123
+    pathpost <- "/albedo/work/user/cdanek/post"
+    pathplot <- "/albedo/work/user/cdanek/plots"
 } else {
     stop("hostname \"", hostname, "\" unknown: set `pathpost` and `pathplot` for it")
 }
-# post file `f` relative to `pathpost`: its 1st existing copy, else where it is made (under the 1st `pathpost`)
-ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
+
+#####################################################################################################
 
 experiments <- list(
-    list(experiment="pi_noxios", from=1850, to=1858)
-    #,list(experiment="pi_noxios_zstar", from=1850, to=1858)
+    #list(experiment="pi_noxios", from=1850, to=1858)
+    #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059)
+    # [optional] `plot_from`/`plot_to` restricts just this experiment to that
+    # calendar-year range (plot.r then reads only the needed time steps); unset
+    # --> its full `from`-`to` range. `fout` below uses "<plot_from>"/
+    # "<plot_to>" placeholders, auto-filled by plot.r with the actual plotted
+    # range either way.
+    list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059, plot_to=1880)
 )
 
+#####################################################################################################
+
+# post file `f` relative to `pathpost`: its 1st existing copy, else where it is made (under the 1st `pathpost`)
+ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
 fin_lpj <- function(v, exp) paste0("lpj_guess/fldint/", v, "/", v, "_year_fldint_lpj_guess_", exp$experiment, "_r1i1p1f1_r360x180_", exp$from, "-", exp$to, ".nc")
 fin_recom <- function(v, exp) paste0("recom/fldsum/", v, "/", v, "_year_fldsum_recom_", exp$experiment, "_r1i1p1f1_core3_", exp$from, "-", exp$to, ".nc")
-fin_both <- function(v, exp) paste0("lpj_recom/", v, "/", v, "_year_lpj_recom_", exp$experiment, "_", exp$from, "-", exp$to, ".nc")
+fin_both <- function(v, exp) paste0("lpj_guess_recom/fldint/", v, "/", v, "_year_fldint_lpj_guess_recom_", exp$experiment, "_", exp$from, "-", exp$to, ".nc")
 
 comp_cols <- c("black", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "grey50", "red")
 plots <- list()
@@ -56,8 +69,9 @@ if (T) { # per experiment: d(cLand + cOcean)/dt = -NEE + CO2f + residual, residu
                 list(fin=ppost(fin_lpj("wetlandCH4_monthly", exp)), fac=-1, label="-wetland CH4 (as C)", col=comp_cols[8], lty=2)
             ),
             ylab="flux [PgC/yr] (>0: into land/ocean)",
-            #fout=paste0(pathplot, "/lpj_recom/cbudget/cland_cocean_budget_lpj_recom_", exp$experiment, "_", exp$from, "-", exp$to, ".", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_recom/cbudget/cland_cocean_budget_lpj_recom_", exp$experiment, "_", exp$from, "-", exp$to, ".", c("png"))
+            plot_from=exp$plot_from, plot_to=exp$plot_to,
+            #fout=paste0(pathplot, "/lpj_recom/cbudget/cland_cocean_budget_lpj_recom_", exp$experiment, "_", "<plot_from>-<plot_to>", ".", c("png", "pdf"))
+            fout=paste0(pathplot, "/lpj_recom/cbudget/cland_cocean_budget_lpj_recom_", exp$experiment, "_", "<plot_from>-<plot_to>", ".", c("png"))
         )
     }
 }

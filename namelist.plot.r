@@ -14,6 +14,8 @@
 pathpost <- "/work/{ab1095,ba1103,ba1066}/a270073/post"
 pathplot <- "/work/ab1095/a270073/plot"
 
+#####################################################################################################
+
 plots <- list()
 if (T) {
     plots[[length(plots)+1]] <- list(
@@ -26,6 +28,8 @@ if (T) {
         fout=paste0(pathplot, "/echam/fldmean/co2_burden/cu2_burden_mon_fldmean_C-E-126-534_2015-2100.png")
     )
 }
+
+#####################################################################################################
 
 if (length(plots) == 0) stop("no plot activated; flip at least one `if (T)`/`if (F)` above to `if (T)`")
 

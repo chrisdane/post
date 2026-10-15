@@ -9,17 +9,25 @@ hostname <- Sys.info()["nodename"]
 if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
     pathpost <- c("/work/ab1095/a270073/post", "/work/ba1103/a270073/post") # searched in this order; new derived files go to the 1st
     pathplot <- "/work/ab1095/a270073/plots"
+} else if (grepl("albedo|^prod-[0-9]+$", hostname)) { # albedo; login nodes: albedo1/2; compute nodes: prod-123
+    pathpost <- "/albedo/work/user/cdanek/post"
+    pathplot <- "/albedo/work/user/cdanek/plots"
 } else {
     stop("hostname \"", hostname, "\" unknown: set `pathpost` and `pathplot` for it")
 }
-# post file `f` relative to `pathpost`: its 1st existing copy, else where it is made (under the 1st `pathpost`)
-ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
+
+#####################################################################################################
 
 # experiments as in namelist.post_recom_carbon.r; overlaid in the per-variable plots
 experiments <- list(
-    list(experiment="pi_noxios", from=1850, to=1858, col="black")
-    #,list(experiment="pi_noxios_zstar", from=1850, to=1858, col="red")
+    #list(experiment="pi_noxios", from=1850, to=1858, col="black")
+    list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059, col="black")
 )
+
+# [optional] restrict ALL plots below to just this calendar-year range: set
+# `plot_from`/`plot_to` here (see plot.r), read only the needed time steps
+# instead of the whole file. `fout` below uses "<plot_from>"/"<plot_to>"
+# placeholders, auto-filled by plot.r with the actual plotted range either way.
 
 # all annual means of the monthly output
 vars <- list()
@@ -30,11 +38,14 @@ for (v in c("calcdiss", "calcif", "CO2f", "docexd", "docexn", "GPPd", "GPPn", "N
     vars[[length(vars)+1]] <- list(v=v, unit="PgC/yr", fac=if (grepl("^resp|^calcdiss", v)) -1 else 1, signed=!grepl("^docex", v))
 }
 
+#####################################################################################################
+
+# post file `f` relative to `pathpost`: its 1st existing copy, else where it is made (under the 1st `pathpost`)
+ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
 fin <- function(v, exp) paste0("recom/fldsum/", v, "/", v, "_year_fldsum_recom_", exp$experiment, "_r1i1p1f1_core3_", exp$from, "-", exp$to, ".nc")
 exps_str <- paste(sapply(experiments, "[[", "experiment"), collapse="_vs_")
-yrs_str <- paste0(min(sapply(experiments, "[[", "from")), "-", max(sapply(experiments, "[[", "to")))
-fout <- function(name, exp) paste0(pathplot, "/recom/fldsum/cbudget/", name, "_fldsum_recom_", exp$experiment, "_", exp$from, "-", exp$to, ".", c("png"))
-#fout <- function(name, exp) paste0(pathplot, "/recom/fldsum/cbudget/", name, "_fldsum_recom_", exp$experiment, "_", exp$from, "-", exp$to, ".", c("png", "pdf"))
+fout <- function(name, exp) paste0(pathplot, "/recom/fldsum/cbudget/", name, "_fldsum_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+#fout <- function(name, exp) paste0(pathplot, "/recom/fldsum/cbudget/", name, "_fldsum_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
 
 # sums and budget terms without own recom output, made here with cdo
 mk <- function(vout, cmd, exp) {
@@ -73,7 +84,7 @@ if (T) { # per variable: experiments overlaid
         plots[[length(plots)+1]] <- list(
             datas=lapply(experiments, function(exp) list(fin=fin(x$v, exp), fac=if (is.null(x$fac)) 1 else x$fac, label=exp$experiment, col=exp$col)),
             ylab=paste0(if (identical(x$fac, -1)) "-", x$v, " [", x$unit, "]", if (isTRUE(x$signed)) " (>0: into ocean)"),
-            fout=paste0(pathplot, "/recom/fldsum/", x$v, "/", x$v, "_year_fldsum_recom_", exps_str, "_", yrs_str, ".png")
+            fout=paste0(pathplot, "/recom/fldsum/", x$v, "/", x$v, "_year_fldsum_recom_", exps_str, "_<plot_from>-<plot_to>.png")
         )
     }
 }

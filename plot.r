@@ -9,7 +9,19 @@
 # usage: set `plots` (and optional config below) in a namelist and source this file
 #
 # each element of `plots` is a list with:
-#   fout    - output file(s), ".png" and/or ".pdf"
+#   fout    - output file(s), ".png" and/or ".pdf". May contain "<plot_from>"/
+#             "<plot_to>" placeholders, substituted with this plot's own
+#             `plot_from`/`plot_to` (below) if set, else the actual calendar-year
+#             range found in its data (so the name reflects whatever time range
+#             was actually plotted even if `plot_from`/`plot_to` were never
+#             set at all). Only substituted if present; `fout` is left as is
+#             otherwise. A job whose `fout` uses either placeholder has its
+#             data read before `fout` can be resolved (needed to derive the
+#             fallback range), so it loses the usual before-reading
+#             `force`/already-exists skip -- only the plotting itself is
+#             skipped in that case, not the (cheap, if `plot_from`/`plot_to`
+#             restrict it) read. Errors only if a placeholder is present and
+#             no range -- explicit or data-derived -- could be found at all.
 #   pathout - [optional] output dir, default: dirname(fout)
 #   mode    - [optional] "auto" (default) or "pairwise"
 #   datas   - list of 1 or more datasets to plot together, each a list with:
@@ -18,7 +30,21 @@
 #     label    - [optional] default: varname
 #     index    - [optional] list(dimname=index) to slice away dims; size-1 dims are dropped anyway
 #     fac      - [optional] factor the data is multiplied with, e.g. -1 to flip the sign; default: 1
+#     plot_from, plot_to - [optional] overrides the plot-level `plot_from`/`plot_to` (see below) for just this dataset
 #     col, lty, lwd - [optional] line plots only
+#   plot_from,
+#   plot_to - [optional] inclusive calendar-year range to actually plot, e.g.
+#             plot_from=1900, plot_to=2000 -- restricts a dataset's time dim
+#             to just this range, read directly via `ncvar_get(..., start=,
+#             count=)` rather than reading every time step and subsetting in
+#             R afterward (matters for big files). May be set per plot (here,
+#             applies to every dataset in `datas`), per dataset (its own
+#             `plot_from`/`plot_to`, overriding the plot-level one for just
+#             that dataset), and/or globally for every plot in this whole run
+#             (config `plot_from`/`plot_to` below, overridden by a plot's/
+#             dataset's own). Ignored (with a message) for a dataset
+#             whose variable has no single recognized time dim, or whose
+#             time dim's units could not be parsed into an actual time axis.
 #   width, height, res - [optional] png px and ppi (pdf: width/res, height/res inch); default: plot_sizes()
 #   ylab    - [optional] line plots only; default: label and units of the 1st dataset
 #   legend_pos - [optional] line plots only; "my_maxempty" (default; "topleft" if it fails),
@@ -40,7 +66,11 @@ source("~/scripts/r/functions/image.plot.nxm.r")
 user_set <- function(varname) exists(varname, where=globalenv(), inherits=F)
 
 # not `job$x`: partial matching would return e.g. job$mode for job$m
-job_get <- function(job, field, default=NULL) if (field %in% names(job)) job[[field]] else default
+# explicit NULL counts as "not given" (falls through to `default`) --
+# otherwise `list(plot_from=exp$plot_from, ...)` with an absent `exp$plot_from`
+# would store a present-but-NULL "plot_from" key, winning over `default` when
+# it shouldn't
+job_get <- function(job, field, default=NULL) if (field %in% names(job) && !is.null(job[[field]])) job[[field]] else default
 if (!user_set("dry")) dry <- F # if T: do not plot
 if (!user_set("force")) force <- F # if T: redo even if fout already exists
 if (!user_set("cdo")) {
@@ -59,6 +89,8 @@ if (!user_set("family")) family <- "Graphik Regular Trial" # fallback: png "Droi
 if (!user_set("mgp")) mgp <- c(1.35, 0.5, 0) # lines of axis title (contour plots only), tick labels, axis (default: c(3, 1, 0))
 if (!user_set("tcl")) tcl <- -0.3 # tick length (default: -0.5)
 if (!user_set("pathpost")) pathpost <- "" # where to search a `fin` given as bare file name
+if (!user_set("plot_from")) plot_from <- NULL # [optional] restrict ALL plots to just this calendar-year range by default (reads only the needed time steps); overridden by a plot's/dataset's own `plot_from`/`plot_to`
+if (!user_set("plot_to")) plot_to <- NULL
 
 ##################################################################################
 
@@ -100,8 +132,10 @@ resolve_fin <- function(fin, ploti, datai) {
     hits
 } # resolve_fin
 
-# read 1 dataset
-read_data <- function(d, ploti, datai) {
+# read 1 dataset; `plot_from`/`plot_to` (may be NULL): this plot's default
+# calendar-year range to restrict the time dim to, overridden by `d`'s own
+# `plot_from`/`plot_to` if it has them
+read_data <- function(d, ploti, datai, plot_from=NULL, plot_to=NULL) {
     fin <- resolve_fin(job_get(d, "fin"), ploti, datai)
     nc <- ncdf4::nc_open(fin)
     varname <- job_get(d, "varname")
@@ -117,13 +151,79 @@ read_data <- function(d, ploti, datai) {
              paste(names(nc$var), collapse=", "))
     }
     vardims <- sapply(nc$var[[varname]]$dim, function(dd) dd$name)
-    arr <- ncdf4::ncvar_get(nc, varname, collapse_degen=F)
+    time_dim_ind <- which(!is.na(match(vardims, known_time_dimnames)))
+
+    # `plot_from`/`plot_to`: restrict reading to just the needed time steps via
+    # `ncvar_get(..., start=, count=)`, instead of reading the whole file and
+    # subsetting in R afterward -- matters for big files
+    plot_from_d <- job_get(d, "plot_from", plot_from)
+    plot_to_d <- job_get(d, "plot_to", plot_to)
+    if (!is.null(plot_from_d) && !is.null(plot_to_d) && plot_from_d > plot_to_d) {
+        stop("plot ", ploti, ", data ", datai, ": `plot_from` = ", plot_from_d, " > `plot_to` = ", plot_to_d)
+    }
+    start <- count <- i_from <- i_to <- NULL
+    if (!is.null(plot_from_d) || !is.null(plot_to_d)) {
+        if (length(time_dim_ind) != 1) {
+            message("--> data ", datai, ": `plot_from`/`plot_to` given but found ", length(time_dim_ind),
+                    " recognized time dim(s) among ", paste(vardims, collapse=", "), " --> ignore `plot_from`/`plot_to`")
+        } else {
+            tdim <- vardims[time_dim_ind]
+            traw <- nc$dim[[tdim]]$vals
+            tunits <- if (is.null(nc$dim[[tdim]]$units)) "" else nc$dim[[tdim]]$units
+            tvals <- maybe_time_axis(tdim, traw, tunits)
+            if (!inherits(tvals, "POSIXct")) {
+                message("--> data ", datai, ": `plot_from`/`plot_to` given but dim \"", tdim, "\"'s units = \"", tunits,
+                        "\" could not be converted to a time axis --> ignore `plot_from`/`plot_to`")
+            } else {
+                from_bound <- if (is.null(plot_from_d)) -Inf else as.POSIXct(paste0(plot_from_d, "-01-01 00:00:00"), tz="UTC")
+                to_bound <- if (is.null(plot_to_d)) Inf else as.POSIXct(paste0(plot_to_d, "-12-31 23:59:59"), tz="UTC")
+                keep <- which(tvals >= from_bound & tvals <= to_bound)
+                if (length(keep) == 0) {
+                    stop("plot ", ploti, ", data ", datai, ": `plot_from` = ", if (is.null(plot_from_d)) "NULL" else plot_from_d,
+                         ", `plot_to` = ", if (is.null(plot_to_d)) "NULL" else plot_to_d, " match no time step of dim \"", tdim,
+                         "\" in \"", fin, "\" (", length(tvals), " steps, ", format(tvals[1]), " to ", format(tvals[length(tvals)]), ")")
+                }
+                if (!all(diff(keep) == 1)) {
+                    stop("plot ", ploti, ", data ", datai, ": time steps of dim \"", tdim, "\" matching `plot_from`/`plot_to` ",
+                         "are not contiguous -- unexpected, check the file's time axis")
+                }
+                i_from <- min(keep); i_to <- max(keep)
+                start <- rep(1, length(vardims)); count <- rep(-1, length(vardims))
+                start[time_dim_ind] <- i_from
+                count[time_dim_ind] <- i_to - i_from + 1
+                message("--> data ", datai, ": `plot_from`/`plot_to` --> read only time steps ", i_from, "-", i_to,
+                        " of ", length(tvals), " (", format(tvals[i_from]), " to ", format(tvals[i_to]), ")")
+            }
+        }
+    }
+
+    arr <- if (is.null(start)) {
+        ncdf4::ncvar_get(nc, varname, collapse_degen=F)
+    } else {
+        ncdf4::ncvar_get(nc, varname, start=start, count=count, collapse_degen=F)
+    }
     units_att <- suppressWarnings(ncdf4::ncatt_get(nc, varname, "units"))
     units <- if (units_att$hasatt) units_att$value else ""
-    dimvals <- lapply(vardims, function(nm) nc$dim[[nm]]$vals)
+    dimvals <- lapply(seq_along(vardims), function(i) {
+        vals <- nc$dim[[vardims[i]]]$vals
+        if (!is.null(start) && i == time_dim_ind) vals <- vals[i_from:i_to]
+        vals
+    })
     names(dimvals) <- vardims
     dimunits <- vapply(vardims, function(nm) if (is.null(nc$dim[[nm]]$units)) "" else nc$dim[[nm]]$units, character(1))
     ncdf4::nc_close(nc)
+
+    # this dataset's own actual (post-restriction, if any) time range, as plain
+    # calendar years -- used as the "<plot_from>"/"<plot_to>" fallback in
+    # `resolve_fout()` for a plot with no `plot_from`/`plot_to` of its own
+    year_from <- year_to <- NA_integer_
+    if (length(time_dim_ind) == 1) {
+        tv <- maybe_time_axis(vardims[time_dim_ind], dimvals[[time_dim_ind]], dimunits[time_dim_ind])
+        if (inherits(tv, "POSIXct") && length(tv) > 0) {
+            year_from <- as.integer(format(tv[1], "%Y"))
+            year_to <- as.integer(format(tv[length(tv)], "%Y"))
+        }
+    }
 
     # apply `index` and drop size-1 dims in 1 `[` call
     orig_dim <- dim(arr)
@@ -145,7 +245,8 @@ read_data <- function(d, ploti, datai) {
     label <- job_get(d, "label", varname)
     message("--> data ", datai, ": \"", label, "\" (\"", varname, "\" from \"", fin, "\") --> ", length(vardims), " remaining dim(s): ",
             if (length(vardims) == 0) "(none, scalar)" else paste(vardims, collapse=", "))
-    list(data=arr, dims=vardims, dimvals=dimvals[vardims], dimunits=dimunits[vardims], varname=varname, units=units, label=label)
+    list(data=arr, dims=vardims, dimvals=dimvals[vardims], dimunits=dimunits[vardims], varname=varname, units=units, label=label,
+         year_from=year_from, year_to=year_to)
 } # read_data
 
 axis_label <- function(dimname, dimunits) if (nzchar(dimunits)) paste0(dimname, " [", dimunits, "]") else dimname
@@ -172,14 +273,59 @@ maybe_time_axis <- function(dimname, vals, units) {
     origin + vals*mult
 } # maybe_time_axis
 
-resolve_fout <- function(job, ploti) {
+# `year_from`/`year_to` (may be NULL): fallback for the "<plot_from>"/"<plot_to>"
+# placeholders below, used only if this plot has no `plot_from`/`plot_to` of its
+# own -- the main loop passes in the data's own actual (post-read) time range
+# for this, once known, for a job whose `fout` needs it
+resolve_fout <- function(job, ploti, year_from=NULL, year_to=NULL) {
     fout <- job_get(job, "fout")
     if (is.null(fout)) stop("plot ", ploti, " has no `fout`")
     if (!is.character(fout) || length(fout) == 0) stop("plot ", ploti, ": `fout` must be a non-empty character vector")
+    # "<plot_from>"/"<plot_to>" placeholders (optional): substituted with this
+    # plot's own `plot_from`/`plot_to` if set, else `year_from`/`year_to` (the
+    # data's actual time range), so the output filename reflects whatever time
+    # range was actually plotted
+    plot_from <- job_get(job, "plot_from", year_from)
+    plot_to <- job_get(job, "plot_to", year_to)
+    if (grepl("<plot_from>", fout, fixed=T)) {
+        if (is.null(plot_from)) {
+            stop("plot ", ploti, ": `fout` contains \"<plot_from>\" but this plot has no `plot_from` set, and its data ",
+                 "has no usable time dim to derive one from")
+        }
+        fout <- gsub("<plot_from>", plot_from, fout, fixed=T)
+    }
+    if (grepl("<plot_to>", fout, fixed=T)) {
+        if (is.null(plot_to)) {
+            stop("plot ", ploti, ": `fout` contains \"<plot_to>\" but this plot has no `plot_to` set, and its data ",
+                 "has no usable time dim to derive one from")
+        }
+        fout <- gsub("<plot_to>", plot_to, fout, fixed=T)
+    }
     abs <- grepl("^/", fout)
     pathout <- job_get(job, "pathout", dirname(fout))
     ifelse(abs, fout, paste0(pathout, "/", basename(fout)))
 } # resolve_fout
+
+# validate `fouts`' extensions, create their output dir(s) if needed, and (if
+# `force` is F) drop any that already exist -- shared by both the up-front
+# (no "<plot_from>"/"<plot_to>") and the deferred (needs the data first) path
+# in the main loop below
+check_fouts <- function(fouts, ploti) {
+    exts <- tolower(tools::file_ext(fouts))
+    if (!all(exts %in% c("png", "pdf"))) stop("plot ", ploti, ": every `fout` must end in \".png\" or \".pdf\"; got ", paste0("\"", fouts, "\"", collapse=", "))
+    for (pathout in unique(dirname(fouts))) {
+        if (!dir.exists(pathout)) {
+            message("`pathout` = \"", pathout, "\" does not exist --> create")
+            if (!dry) if (!dir.create(pathout, recursive=T) && !dir.exists(pathout)) stop("plot ", ploti, ": failed to create `pathout` = \"", pathout, "\"")
+        }
+    }
+    if (!force) {
+        exist <- file.exists(fouts)
+        if (any(exist)) message("--> already exist and `force` = F --> skip: ", paste0("\"", fouts[exist], "\"", collapse=", "))
+        fouts <- fouts[!exist]
+    }
+    fouts
+} # check_fouts
 
 # fall back if `family` is not installed
 fc_families <- tryCatch(unique(trimws(unlist(strsplit(system("fc-list : family", intern=T, ignore.stderr=T), ",")))),
@@ -203,26 +349,39 @@ for (ploti in seq_along(plots)) {
 
     job_datas <- job_get(job, "datas")
     if (is.null(job_datas) || length(job_datas) == 0) stop("plot ", ploti, " has no `datas`")
-    fouts <- resolve_fout(job, ploti)
-    message("--> fout = ", paste0("\"", fouts, "\"", collapse=", "))
-    exts <- tolower(tools::file_ext(fouts))
-    if (!all(exts %in% c("png", "pdf"))) stop("plot ", ploti, ": every `fout` must end in \".png\" or \".pdf\"; got ", paste0("\"", fouts, "\"", collapse=", "))
-    for (pathout in unique(dirname(fouts))) {
-        if (!dir.exists(pathout)) {
-            message("`pathout` = \"", pathout, "\" does not exist --> create")
-            if (!dry) if (!dir.create(pathout, recursive=T) && !dir.exists(pathout)) stop("plot ", ploti, ": failed to create `pathout` = \"", pathout, "\"")
-        }
-    }
-    if (!force) {
-        exist <- file.exists(fouts)
-        if (any(exist)) message("--> already exist and `force` = F --> skip: ", paste0("\"", fouts[exist], "\"", collapse=", "))
-        fouts <- fouts[!exist]
+    fout_raw <- job_get(job, "fout")
+    if (is.null(fout_raw)) stop("plot ", ploti, " has no `fout`")
+    # "<plot_from>"/"<plot_to>" in `fout` (see `resolve_fout()`) may need the
+    # actual data's own time range as a fallback when this plot has no
+    # `plot_from`/`plot_to` of its own -- that isn't known until the data is
+    # read, so `fout` can only be resolved (and thus only then checked against
+    # `force`) after reading in that case, unlike the normal up-front check
+    # that lets a job be skipped before ever reading its data
+    needs_defer <- any(grepl("<plot_from>", fout_raw, fixed=T)) || any(grepl("<plot_to>", fout_raw, fixed=T))
+
+    if (!needs_defer) {
+        fouts <- resolve_fout(job, ploti)
+        message("--> fout = ", paste0("\"", fouts, "\"", collapse=", "))
+        fouts <- check_fouts(fouts, ploti)
         if (length(fouts) == 0) next
     }
 
+    job_plot_from <- job_get(job, "plot_from", plot_from)
+    job_plot_to <- job_get(job, "plot_to", plot_to)
     datas <- vector("list", length(job_datas))
-    for (datai in seq_along(job_datas)) datas[[datai]] <- read_data(job_datas[[datai]], ploti, datai)
+    for (datai in seq_along(job_datas)) datas[[datai]] <- read_data(job_datas[[datai]], ploti, datai, job_plot_from, job_plot_to)
     ndata <- length(datas)
+
+    if (needs_defer) {
+        year_froms <- sapply(datas, "[[", "year_from")
+        year_tos <- sapply(datas, "[[", "year_to")
+        year_from <- if (all(is.na(year_froms))) NULL else min(year_froms, na.rm=T)
+        year_to <- if (all(is.na(year_tos))) NULL else max(year_tos, na.rm=T)
+        fouts <- resolve_fout(job, ploti, year_from, year_to)
+        message("--> fout = ", paste0("\"", fouts, "\"", collapse=", "))
+        fouts <- check_fouts(fouts, ploti)
+        if (length(fouts) == 0) next
+    }
     ndims <- sapply(datas, function(x) length(x$dims))
     mode <- job_get(job, "mode", "auto")
 
