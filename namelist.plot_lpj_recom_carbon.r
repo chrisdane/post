@@ -70,8 +70,8 @@ if (T) { # per experiment: d(cLand + cOcean)/dt = -NEE + CO2f + residual, residu
             ),
             ylab="flux [PgC/yr] (>0: into land/ocean)",
             plot_from=exp$plot_from, plot_to=exp$plot_to,
-            #fout=paste0(pathplot, "/lpj_recom/cbudget/cland_cocean_budget_lpj_recom_", exp$experiment, "_", "<plot_from>-<plot_to>", ".", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_recom/cbudget/cland_cocean_budget_lpj_recom_", exp$experiment, "_", "<plot_from>-<plot_to>", ".", c("png"))
+            #fout=paste0(pathplot, "/lpj_guess_recom/cbudget/cland_cocean_budget_lpj_guess_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/lpj_guess_recom/cbudget/cland_cocean_budget_lpj_guess_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }

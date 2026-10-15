@@ -24,11 +24,6 @@ experiments <- list(
     list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059, col="black")
 )
 
-# [optional] restrict ALL plots below to just this calendar-year range: set
-# `plot_from`/`plot_to` here (see plot.r), read only the needed time steps
-# instead of the whole file. `fout` below uses "<plot_from>"/"<plot_to>"
-# placeholders, auto-filled by plot.r with the actual plotted range either way.
-
 # all annual means of the monthly output
 vars <- list()
 for (v in c("benC", "benCalc", "DetC", "DetCalc", "DiaC", "DIC", "DOC", "HetC", "idetz2c", "idetz2calc",

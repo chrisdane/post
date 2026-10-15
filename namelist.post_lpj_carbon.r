@@ -72,7 +72,7 @@ if (F) { # levante
 
 } else if (T) { # albedo
     experiments <- list(
-        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.0-cc/AWI-ESM3-CC-LR-CMIP7-Spinup/outdata/lpj_guess")
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.0-cc/AWI-ESM3-CC-LR-CMIP7-Spinup/outdata/lpj_guess", to=2059)
     )
     lpj_remap_fpattern <- "remapcon_r360x180"
     flandarea <- "/albedo/work/user/cdanek/mesh/lpj/TCO95/landarea_remapcon_r360x180_destarea.nc"
@@ -89,6 +89,8 @@ for (exp in experiments) {
             model      = "lpj_guess",
             experiment = exp$experiment,
             pathin     = exp$pathin,
+            from       = exp$from,
+            to         = exp$to,
             fpattern   = paste0("<from>0101-<to>1231/", x$f, "_", lpj_remap_fpattern, ".nc"),
             varnamein  = x$v,
             varnameout = if (!is.null(x$vout)) x$vout else if (grepl("_(yearly|monthly)$", x$f)) x$f else x$v, # e.g. cVeg_yearly, cVeg_monthly

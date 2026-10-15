@@ -665,18 +665,18 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
         }
 
         if (!from_given || !to_given) {
-            # neither/either given --> use every chunk file found, spanning
-            # its own full min/max range, rather than a caller-specified one
-            keep <- rep(T, length(all_files))
+            # missing bound(s) derived from every chunk file found, spanning
+            # its own full min/max range; a bound that *is* given still
+            # restricts which chunks are kept (below), same as when both
+            # are given
             if (!from_given) from <- min(file_from)
             if (!to_given) to <- max(file_to)
             message("--> `from`/`to` not (both) given --> derived from found \"<from>\"/\"<to>\" files: ", from, "-", to)
-        } else {
-            keep <- file_to >= from & file_from <= to # overlaps the requested range
-            if (!any(keep)) {
-                stop("job ", jobi, ": found ", length(all_files), " file(s) via \"<from>\"/\"<to>\", but none overlap the requested range ",
-                     from, "-", to, "; found range(s): ", paste(paste0(file_from, "-", file_to), collapse=", "))
-            }
+        }
+        keep <- file_to >= from & file_from <= to # overlaps the (given or derived) requested range
+        if (!any(keep)) {
+            stop("job ", jobi, ": found ", length(all_files), " file(s) via \"<from>\"/\"<to>\", but none overlap the requested range ",
+                 from, "-", to, "; found range(s): ", paste(paste0(file_from, "-", file_to), collapse=", "))
         }
         ord <- order(file_from[keep])
         files <- all_files[keep][ord]
