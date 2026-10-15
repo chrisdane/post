@@ -121,16 +121,6 @@
 #                as part of the variable selection itself
 #                (`-select,name=...,level=...`), so this is where cdo does
 #                the actual subsetting -- not a separate operator.
-#   griddes    - [optional] path to a grid description file (any format
-#                `cdo setgrid` accepts: a griddes text file, or another data
-#                file whose grid is copied). Needed whenever the input's own
-#                grid is not correctly/fully described in the file itself --
-#                the classic case being an unstructured mesh (e.g. native
-#                FESOM output), where `fldmean`/`fldint`/etc. would otherwise
-#                be spatially meaningless (wrong/no cell weights) or cdo may
-#                not recognize the grid at all. Not specific to any one
-#                model: leave unset for input whose grid is already fine as
-#                is (e.g. a regular lon/lat grid). Applied after selection.
 #   code       - [optional] path to a cdo code table / partab file (`cdo -t
 #                <code>`), needed to resolve numeric GRIB codes to variable
 #                names before `varnamein` can be selected by name at all --
@@ -144,11 +134,14 @@
 #                leading "-", e.g. "-remapycon,r180x90" or
 #                "-setmisstonn -remapycon,r180x90" for several chained
 #                together), applied *before* the `mode` statistic -- but
-#                after selection/`level`/`griddes`, so e.g. `griddes` +
-#                `cdo_pre = "-remapycon,r180x90"` is the classic "setgrid +
-#                remapycon" combination: attach the correct source grid,
-#                then regrid to a regular one before e.g. a `zonmean`
-#                (which needs a regular grid) can be computed on it.
+#                after selection/`level`, so e.g.
+#                `cdo_pre = "-remapycon,r180x90 -setgrid,/path/to/mesh.nc"`
+#                is the classic "setgrid + remapycon" combination: attach
+#                the correct source grid (needed whenever the input's own
+#                grid is not correctly/fully described in the file itself --
+#                the classic case being an unstructured mesh, e.g. native
+#                FESOM output), then regrid to a regular one before e.g. a
+#                `zonmean` (which needs a regular grid) can be computed on it.
 #   cdo_post   - [optional] 1 or more cdo operator(s) (same "-op,args"
 #                syntax as `cdo_pre`), applied *after* the `mode` statistic
 #                -- chained into the *same* cdo command/call as everything
@@ -214,12 +207,12 @@ user_set <- function(varname) exists(varname, where=globalenv(), inherits=F)
 
 # same class of bug as `user_set()` above, but for 1 job's fields: both
 # `job$field` and `job[[field]]` (its default `exact=NA`) do *partial*
-# matching on list names, so e.g. `job$grid` silently returns
-# `job$griddes`'s value whenever `grid` itself is unset but `griddes` is
-# (confirmed by testing) -- several of this script's own job field names
-# collide exactly this way ("grid"/"griddes", "pathin"/"pathout",
-# "mode"/"mode_args"). `%in% names(job)` is a plain string equality check
-# with no such fallback, so gate every job field access through this.
+# matching on list names, so e.g. `job$pathin` could silently return
+# `job$pathout`'s value whenever `pathin` itself is unset but `pathout` is
+# (confirmed by testing) -- some of this script's own job field names
+# collide exactly this way ("pathin"/"pathout", "mode"/"mode_args").
+# `%in% names(job)` is a plain string equality check with no such fallback,
+# so gate every job field access through this.
 job_get <- function(job, field, default=NULL) if (field %in% names(job)) job[[field]] else default
 if (!user_set("dry")) dry <- F # if T: only print what would be run
 if (!user_set("force")) force <- F # if T: redo even if fout already exists
@@ -240,7 +233,7 @@ if (!user_set("jobs")) stop("must provide a `jobs` list before sourcing post.r; 
 # misspelt field (e.g. "fpatern"), which a shared `common` list passes on to
 # every job built from it
 known_fields <- c("pathin", "fpattern", "from", "to", "varnamein", "varnameout",
-                  "mode", "mode_args", "level", "griddes", "code", "cdo_pre", "cdo_post",
+                  "mode", "mode_args", "level", "code", "cdo_pre", "cdo_post",
                   "model", "experiment", "variant", "grid", "pathout", "fout", "do")
 if (!is.list(jobs) || length(jobs) == 0) stop("`jobs` must be a non-empty list of jobs")
 for (jobi in seq_along(jobs)) {
@@ -256,7 +249,7 @@ for (jobi in seq_along(jobs)) {
 }
 
 # ---- cdo version (need to know if selection+statistic can be chained: cdo >= 1.9.4) ----
-cdo_version_str <- system(paste0(cdo, " --version 2>&1"), intern=T)[1] # e.g. "Climate Data Operators version 2.6.0 (...)"
+cdo_version_str <- system(paste0(cdo, " --version"), intern=T, ignore.stderr=T)[1] # e.g. "Climate Data Operators version 2.6.0 (...)"
 cdo_version <- regmatches(cdo_version_str, regexpr("[0-9]+\\.[0-9]+\\.[0-9]+", cdo_version_str))
 if (length(cdo_version) != 1) stop("could not parse a version number (X.Y.Z) from `cdo --version` output: \"", cdo_version_str, "\"")
 cdo_version <- base::numeric_version(cdo_version)
@@ -725,13 +718,9 @@ cdo_prefix <- function(codes) {
 # temp file as a 2nd command (`code`/`-f nc` only apply to that 1st,
 # file-reading command -- the 2nd, on the by-then-proper-netCDF temp file,
 # needs neither).
-# `griddes` (may be "" for none): applied *after* selection -- fixes/attaches
-# the grid the raw data is on, needed before any spatial statistic
-# (`fldmean`/`fldint`/etc.) can get cell weights right, in particular for an
-# unstructured mesh.
 # `cdo_pre` (may be "" for none): 1 or more cdo operator(s) (with their own
-# leading "-", e.g. "-remapycon,r180x90"), applied after `griddes`'s
-# `-setgrid` but before the `mode` statistic -- e.g. the classic
+# leading "-", e.g. "-remapycon,r180x90 -setgrid,/path/to/mesh.nc"), applied
+# after selection but before the `mode` statistic -- e.g. the classic
 # "setgrid + remapycon" combination, regridding an unstructured mesh to a
 # regular grid before e.g. computing a `zonmean` on it (which needs one).
 # `cdo_post` (may be "" for none): 1 or more cdo operator(s), applied right
@@ -743,19 +732,18 @@ cdo_prefix <- function(codes) {
 # operator, but not equivalent to a single run-once-at-the-end call for an
 # operator that is itself sensitive to that split (e.g. a further temporal
 # one).
-cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, griddes, codes, cdo_pre, cdo_post, fout_i) {
+cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_i) {
     calc <- mode_to_calc(mode, mode_args)
     sel <- paste0("-setname,", varnameout, " ", sel_op(varnamein, level, from, to, needs_year_filter))
-    setgrid <- if (nzchar(griddes)) paste0("-setgrid,", griddes) else ""
     filestr <- paste(files, collapse=" ")
 
     if (cdo_can_chain) {
-        cmd <- paste0(cdo_prefix(codes), " ", cdo_post, " ", calc, " ", cdo_pre, " ", setgrid, " ", sel, " ", filestr, " ", fout_i)
+        cmd <- paste0(cdo_prefix(codes), " ", cdo_post, " ", calc, " ", cdo_pre, " ", sel, " ", filestr, " ", fout_i)
         cmd <- gsub("[[:space:]]+", " ", cmd) # tidy up in case any piece was ""
         run_cmd(cmd, files)
     } else {
         tmpfile <- paste0(tools::file_path_sans_ext(fout_i), "_tmp_select_", Sys.getpid(), ".nc")
-        run_cmd(gsub("[[:space:]]+", " ", paste0(cdo_prefix(codes), " ", cdo_pre, " ", setgrid, " ", sel, " ", filestr, " ", tmpfile)), files)
+        run_cmd(gsub("[[:space:]]+", " ", paste0(cdo_prefix(codes), " ", cdo_pre, " ", sel, " ", filestr, " ", tmpfile)), files)
         if (mode == "select" && !nzchar(cdo_post)) {
             run_cmd(paste0(if (clean) "mv " else "cp ", tmpfile, " ", fout_i))
         } else {
@@ -770,15 +758,14 @@ cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, 
 # characters, running 1 chunk at a time and `cdo cat`-ing the chunk results
 # back together into 1 final `fout` (chunk count 1 is the common case: just
 # runs directly, no cat needed).
-cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, griddes, codes, cdo_pre, cdo_post, fout) {
-    setgrid <- if (nzchar(griddes)) paste0("-setgrid,", griddes, " ") else ""
-    nchar_fixed <- nchar(paste0(cdo_prefix(codes), " ", cdo_post, " ", mode_to_calc(mode, mode_args), " ", cdo_pre, " ", setgrid,
+cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout) {
+    nchar_fixed <- nchar(paste0(cdo_prefix(codes), " ", cdo_post, " ", mode_to_calc(mode, mode_args), " ", cdo_pre,
                                 " -setname,", varnameout, " ", sel_op(varnamein, level, from, to, needs_year_filter), " ", fout))
     nchar_per_file <- nchar(files) + 1L # +1 for the separating space
     nchar_total <- nchar_fixed + sum(nchar_per_file)
 
     if (nchar_total <= cdo_nchar_max_arglist) { # fits in 1 command -- the common case
-        cdo_select_calc_1cmd(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, griddes, codes, cdo_pre, cdo_post, fout)
+        cdo_select_calc_1cmd(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout)
         return(invisible())
     }
 
@@ -795,7 +782,7 @@ cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level
         message("\nchunk ", chunki, "/", nchunks, " ...")
         i_from <- chunk_starts[chunki]
         i_to <- min(i_from + nfiles_per_chunk - 1, length(files))
-        cdo_select_calc_1cmd(files[i_from:i_to], varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, griddes, codes, cdo_pre, cdo_post, fout_chunks[chunki])
+        cdo_select_calc_1cmd(files[i_from:i_to], varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_chunks[chunki])
     }
 
     message("\ncat ", nchunks, " chunks together ...")
@@ -829,8 +816,6 @@ for (jobi in seq_along(jobs)) {
     mode <- job_get(job, "mode")
     mode_args <- job_get(job, "mode_args", "")
     level <- job_get(job, "level", "")
-    griddes <- job_get(job, "griddes", "")
-    if (nzchar(griddes) && !file.exists(griddes)) stop("job ", jobi, "'s `griddes` = \"", griddes, "\" does not exist")
     codes <- job_get(job, "code", "") # resolved below
     cdo_pre <- job_get(job, "cdo_pre", "")
     cdo_post <- job_get(job, "cdo_post", "")
@@ -906,7 +891,7 @@ for (jobi in seq_along(jobs)) {
     if (file.exists(fout) && !force) {
         message("--> already exists and `force` = F --> skip")
     } else {
-        cdo_select_calc(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, griddes, codes, cdo_pre, cdo_post, fout)
+        cdo_select_calc(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout)
         if (!dry && !file.exists(fout)) stop("job ", jobi, ": `fout` = \"", fout, "\" was not created")
         message("--> done: \"", fout, "\"")
     }

@@ -27,7 +27,7 @@ vars <- list(
     list(f="cSoil_yearly", v="cSoil", conv=kgC_to_PgC, unit="PgC"),
     list(f="cProduct_yearly", v="cProduct", conv=kgC_to_PgC, unit="PgC"),
     # main fluxes [kg C m-2 yr-1]
-    list(f="anpp", v="Total", vout="anpp", conv=kgC_to_PgC, unit="PgC/yr"),
+    #list(f="anpp", v="Total", vout="anpp", conv=kgC_to_PgC, unit="PgC/yr"),
     list(f="cflux", v="Soil", vout="cflux_Soil", conv=kgC_to_PgC, unit="PgC/yr"), # = annual SOILC + organic carbon leaching = rh + fCLandToOcean to within 0.001 PgC yr-1
     list(f="cflux", v="Fire", vout="cflux_Fire", conv=kgC_to_PgC, unit="PgC/yr")
 )
@@ -35,7 +35,9 @@ vars <- list(
 # all other c variables (except *Lut, per-pft and duplicates); monthly pools [kg C m-2], fluxes [kg C m-2 s-1]
 if (T) {
     for (v in c("cLand", "cLand1st", "cLeaf", "cLitter", "cLitterCwd", "cLitterSubSurf", "cLitterSurf", "cOther", "cProduct", "cRoot",
-                "cSoil", "cSoilFast", "cSoilMedium", "cSoilSlow", "cStem", "cVeg", "cVegGrass", "cVegShrub", "cVegTree")) {
+                "cSoil", "cSoilFast", "cSoilMedium", "cSoilSlow", "cStem",
+                #"cVeg",
+                "cVegGrass", "cVegShrub", "cVegTree")) {
         vars[[length(vars)+1]] <- list(f=paste0(v, "_monthly"), v=v, conv=kgC_to_PgC, unit="PgC")
     }
     # fCLandToOcean is sent to atmopshere, included in:
@@ -59,15 +61,26 @@ if (T) {
 
 #####################################################################################################
 
-if (T) {
+if (F) { # levante
     experiments <- list(
         list(experiment="pi_noxios", pathin="/work/ab1095/a270073/out/awiesm3-v3.5.0-cc/pi_noxios/outdata/lpj_guess")
         #,list(experiment="pi_noxios_zstar", pathin="/work/ab1095/a270073/out/awiesm3-v3.5.0-cc/pi_noxios_zstar/outdata/lpj_guess")
     )
-    remap_fpattern <- "remapcon_r360x180"
+    lpj_remap_fpattern <- "remapcon_r360x180"
     flandarea <- "/work/ab1095/a270073/mesh/lpj/TCO95/landarea_remapcon_r360x180_destarea.nc"
     pathout <- "/work/ab1095/a270073/post"
+
+} else if (T) { # albedo
+    experiments <- list(
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.0-cc/AWI-ESM3-CC-LR-CMIP7-Spinup/outdata/lpj_guess")
+    )
+    lpj_remap_fpattern <- "remapcon_r360x180"
+    flandarea <- "/albedo/work/user/cdanek/mesh/lpj/TCO95/landarea_remapcon_r360x180_destarea.nc"
+    pathout <- "/albedo/work/user/cdanek/post"
+
 } # which setting
+
+#####################################################################################################
 
 jobs <- list()
 for (exp in experiments) {
@@ -76,7 +89,7 @@ for (exp in experiments) {
             model      = "lpj_guess",
             experiment = exp$experiment,
             pathin     = exp$pathin,
-            fpattern   = paste0("<year>0101-<year>1231/", x$f, "_", remap_fpattern, ".nc"),
+            fpattern   = paste0("<from>0101-<to>1231/", x$f, "_", lpj_remap_fpattern, ".nc"),
             varnamein  = x$v,
             varnameout = if (!is.null(x$vout)) x$vout else if (grepl("_(yearly|monthly)$", x$f)) x$f else x$v, # e.g. cVeg_yearly, cVeg_monthly
             mode       = "fldint",
