@@ -23,6 +23,26 @@ expand_jobs <- function(common, settings) lapply(settings, function(d) utils::mo
 
 #####################################################################################################
 
+if (F) { # awiesm3 raw fesom/recom
+    jobs <- c(jobs, expand_jobs(
+        common=list(
+            model   = "fesom",
+            #fpattern   = "tra0004.nc",
+            fpattern = "ssh.fesom.<year>.nc",
+            cdo_pre = "-setgrid,/work/ab0246/a270092/input/fesom2/core3/mesh.nc",
+            #cdo_pre = "-setgrid,/work/ab0246/a270092/input/fesom2/core3/mesh.nc -vertint -genlevelbounds",
+            #mode    = "select",
+            mode    = "fldint",
+            #mode    = "fldmean",
+            pathout = "/work/ab1095/a270073/post"
+        ),
+        settings=list(
+            #list(experiment="dp_tp2_omp1_y1_r2050_5", pathin="/work/ab1095/a270073/out/awiesm3-develop-cc/dp_tp2_omp1_y1_r2050_5/restart/fesom")
+            list(experiment="pi_noxios_zstar_noiceb", pathin="/work/ab1095/a270073/out/awiesm3-v3.5.0-cc/pi_noxios_zstar_noiceb/outdata/fesom")
+        )
+    ))
+}
+
 if (F) { # awiesm1 raw fesom/recom
     jobs <- c(jobs, expand_jobs(
         common=list(
@@ -123,26 +143,6 @@ if (F) { # awiesm1 cmorized
                 pathin     = "/work/ik1017/ESGF_Buff/CMIP6/CMIP/AWI/AWI-ESM-1-REcoM_tmp/ScenarioMIP/AWI/AWI-ESM-1-REcoM/ssp585/r1i1p1f1",
                 from  = 2015,
                 to    = 2039
-            )
-        )
-    ))
-}
-
-if (F) { # awiesm3 raw
-    jobs <- c(jobs, expand_jobs(
-        common=list(
-            model   = "AWI-ESM-3-REcoM",
-            fpattern   = "tra0004.nc",
-            cdo_pre = "-setgrid,/work/ab0246/a270092/input/fesom2/core3/mesh.nc -vertint -genlevelbounds",
-            #mode    = "select",
-            mode    = "fldint",
-            #mode    = "fldmean",
-            pathout = "/work/ab1095/a270073/post"
-        ),
-        settings=list(
-            list(
-                experiment = "dp_tp2_omp1_y1_r2050_5",
-                pathin     = "/work/ab1095/a270073/out/awiesm3-develop-cc/dp_tp2_omp1_y1_r2050_5/restart/fesom"
             )
         )
     ))

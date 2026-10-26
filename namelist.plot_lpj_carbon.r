@@ -1,7 +1,7 @@
 # r
 
-# Plots of the LPJ-GUESS carbon time series made by namelist.post_lpg_carbon.r.
-# Run with: `Rscript namelist.plot_lpg_carbon.r`
+# Plots of the LPJ-GUESS carbon time series made by namelist.post_lpj_carbon.r.
+# Run with: `Rscript namelist.plot_lpj_carbon.r`
 
 force <- T # default: F; set T to redo even if fout already exists
 
@@ -18,13 +18,13 @@ if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
 
 #####################################################################################################
 
-# experiments as in namelist.post_lpg_carbon.r; overlaid in the per-variable plots
+# experiments as in namelist.post_lpj_carbon.r; overlaid in the per-variable plots
 experiments <- list(
     #list(experiment="pi_noxios", from=1850, to=1858, col="black")
     list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059, col="black")
 )
 
-# output variable of namelist.post_lpg_carbon.r and its <dtin> in the post.r file name
+# output variable of namelist.post_lpj_carbon.r and its <dtin> in the post.r file name
 # ("year": annual output of lpj_guess or annual mean of a monthly series)
 vars <- list(
     list(v="cLandYr_yearly", dt="year", unit="PgC"), list(v="cFluxYr_yearly", dt="year", unit="PgC/yr"), list(v="cLand_yearly", dt="year", unit="PgC"),

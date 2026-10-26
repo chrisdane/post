@@ -1,7 +1,7 @@
 # r
 
 # Land + ocean carbon budget from lpj_guess and recom, without the atmosphere.
-# Needs the derived series of namelist.plot_lpg_carbon.r (dcLandDt_yearly) and namelist.plot_recom_carbon.r (dcOceanDt): run these first.
+# Needs the derived series of namelist.plot_lpj_carbon.r (dcLandDt_yearly) and namelist.plot_recom_carbon.r (dcOceanDt): run these first.
 # Run with: `Rscript namelist.plot_lpj_recom_carbon.r`
 
 force <- F # default: F; set T to redo even if fout already exists
@@ -20,14 +20,9 @@ if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
 #####################################################################################################
 
 experiments <- list(
-    #list(experiment="pi_noxios", from=1850, to=1858)
+    list(experiment="pi_noxios", from=1850, to=1858)
     #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059)
-    # [optional] `plot_from`/`plot_to` restricts just this experiment to that
-    # calendar-year range (plot.r then reads only the needed time steps); unset
-    # --> its full `from`-`to` range. `fout` below uses "<plot_from>"/
-    # "<plot_to>" placeholders, auto-filled by plot.r with the actual plotted
-    # range either way.
-    list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059, plot_to=1880)
+    #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059, plot_to=1880)
 )
 
 #####################################################################################################
@@ -45,7 +40,7 @@ if (T) { # per experiment: d(cLand + cOcean)/dt = -NEE + CO2f + residual, residu
     # land: dec 31 states and calendar-year NEE; ocean: annual means and the mean CO2f of the 2 years (see namelist.plot_recom_carbon.r)
     for (exp in experiments) {
         need <- ppost(c(fin_lpj("dcLandDt_yearly", exp), fin_recom("dcOceanDt", exp)))
-        if (!all(file.exists(need))) stop("missing ", paste(need[!file.exists(need)], collapse=", "), "; run namelist.plot_lpg_carbon.r and namelist.plot_recom_carbon.r first")
+        if (!all(file.exists(need))) stop("missing ", paste(need[!file.exists(need)], collapse=", "), "; run namelist.plot_lpj_carbon.r and namelist.plot_recom_carbon.r first")
         cmds <- list(dcLandOceanDt=paste0("-add ", need[1], " ", need[2]),
                      cLandOceanBudgetResidual=paste0("-sub -add ", ppost(fin_both("dcLandOceanDt", exp)), " -seltimestep,2/-1 ", ppost(fin_lpj("cflux_NEE", exp)),
                                                      " -runmean,2 ", ppost(fin_recom("CO2f", exp))))
