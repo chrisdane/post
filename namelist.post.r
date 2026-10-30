@@ -82,7 +82,7 @@ if (T) { # awiesm1 raw echam/jsbach
     jobs <- c(jobs, expand_jobs(
         common=list(
             setup   = "AWI-ESM-1-REcoM",
-            model   = "echam6", varnamein="co2_burden", fpattern="*_<year><mon>.01_co2", code="*_<year><mon>.01_co2.codes", mode="fldmean",
+            model   = "echam6", varnamein="co2_burden", fpattern="*_<year><mon>.01_co2", code="*_<year><mon>.01_co2.codes", mode="fldmean", # the model is "echam6", never "echam"
             #model   = "jsbach",
             pathout = "/work/ab1095/a270073/post"
         ),

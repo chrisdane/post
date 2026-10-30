@@ -184,6 +184,7 @@
 #                switch off 1 dataset of a group without commenting it out)
 #   fout       - [optional] output filename; default, CMIP6/CMOR-like:
 #                "<pathout>/<varnameout>_<dtin>_<mode>_<depth>_<setup>_<model>_<experiment>_<variant>_<grid>_<from>-<to>.nc"
+#                (<model> omitted, along with its surrounding "_", when unset)
 #                e.g. "CO2f_mon_fldint_AWI-ESM-1-REcoM_recom_esm-ssp585_r1i1p1f1_gn_2015-2100.nc", or
 #                "spco2_mon_fldmean_AWI-ESM-1-REcoM_ssp126_r1i1p1f1_gr1_2015-2100.nc" without `model`.
 #                <depth> is `level` above (any "," replaced by "-"), omitted

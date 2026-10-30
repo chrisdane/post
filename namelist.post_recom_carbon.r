@@ -58,7 +58,7 @@ for (exp in experiments) {
             cdo_pre    = paste0("-yearmonmean ", if (x$dim == "3d") paste0("-mul ", fnod_area_3d) else paste0("-mul -setzaxis,surface -sellevidx,1 ", fnod_area_3d), " -setgrid,", fgriddes),
             dtin       = "year", # cdo_pre's `-yearmonmean` already reduces the monthly input to annual before `fldsum` runs on it
             cdo_post   = paste0("-setunit,", x$unit, " ", x$conv, if (x$dim == "3d") " -vertint"),
-            grid       = "core3",
+            grid       = "gn",
             pathout    = pathout
         )
     }

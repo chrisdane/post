@@ -23,7 +23,7 @@ experiments <- list(
     #list(experiment="pi_noxios", from=1850, to=1858, col="black")
     #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2229, col="black")
     #,list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", from=2230, to=2389, col="black") # from: 2230
-    list(experiment="AE3CC_pi", from=1850, to=2389, col="black") # 1850-2389 complete range: continues from 2230 (v3.5.1-cc) where the experiment above (v3.5.0-cc) stops at 2339 -- both overlaid 2230-2339 since they're different model versions, not the same data
+    list(experiment="AE3CC_pi", from=1850, to=2444, col="black") # continues from 2230 (v3.5.1-cc) where the experiment above (v3.5.0-cc) stops at 2339 -- both overlaid 2230-2339 since they're different model versions, not the same data
 )
 
 # all annual means of the monthly output
@@ -39,10 +39,11 @@ for (v in c("calcdiss", "calcif", "CO2f", "docexd", "docexn", "GPPd", "GPPn", "N
 
 # post file `f` relative to `pathpost`: its 1st existing copy, else where it is made (under the 1st `pathpost`)
 ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
-fin <- function(v, exp) paste0("AWI-ESM-3-REcoM/fldsum/", v, "/", v, "_year_fldsum_AWI-ESM-3-REcoM_recom_", exp$experiment, "_r1i1p1f1_core3_", exp$from, "-", exp$to, ".nc")
+setup <- "AWI-ESM-3-REcoM"
+fin <- function(v, exp) paste0(setup, "/fldsum/", v, "/", v, "_year_fldsum_", setup, "_recom_", exp$experiment, "_r1i1p1f1_gn_", exp$from, "-", exp$to, ".nc")
 exps_str <- paste(sapply(experiments, "[[", "experiment"), collapse="_vs_")
-fout <- function(name, exp) paste0(pathplot, "/AWI-ESM-3-REcoM/fldsum/cbudget/", name, "_fldsum_AWI-ESM-3-REcoM_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
-#fout <- function(name, exp) paste0(pathplot, "/AWI-ESM-3-REcoM/fldsum/cbudget/", name, "_fldsum_AWI-ESM-3-REcoM_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+fout <- function(name, exp) paste0(pathplot, "/", setup, "/fldsum/cbudget/", name, "_fldsum_", setup, "_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+#fout <- function(name, exp) paste0(pathplot, "/", setup, "/fldsum/cbudget/", name, "_fldsum_", setup, "_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
 
 # sums and budget terms without own recom output, made here with cdo
 mk <- function(vout, cmd, exp) {
@@ -81,7 +82,7 @@ if (T) { # per variable: experiments overlaid
         plots[[length(plots)+1]] <- list(
             datas=lapply(experiments, function(exp) list(fin=fin(x$v, exp), fac=if (is.null(x$fac)) 1 else x$fac, label=exp$experiment, col=exp$col)),
             ylab=paste0(if (identical(x$fac, -1)) "-", x$v, " [", x$unit, "]", if (isTRUE(x$signed)) " (>0: into ocean)"),
-            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldsum/", x$v, "/", x$v, "_year_fldsum_AWI-ESM-3-REcoM_recom_", exps_str, "_<plot_from>-<plot_to>.png")
+            fout=paste0(pathplot, "/", setup, "/fldsum/", x$v, "/", x$v, "_year_fldsum_", setup, "_recom_", exps_str, "_<plot_from>-<plot_to>.png")
         )
     }
 }

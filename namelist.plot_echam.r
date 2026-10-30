@@ -26,16 +26,17 @@ if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
 
 #####################################################################################################
 
+setup <- "AWI-ESM-1-REcoM"
 plots <- list()
 if (T) {
     plots[[length(plots)+1]] <- list(
         datas=list(
-            list(fin="AWI-ESM-1-REcoM/fldmean/co2_burden/co2_burden_mon_fldmean_AWI-ESM-1-REcoM_echam6_ssp126_r1i1p1f1_gn_2015-2100.nc", label="C-126", col="#377EB8")
-            ,list(fin="AWI-ESM-1-REcoM/fldmean/co2_burden/co2_burden_mon_fldmean_AWI-ESM-1-REcoM_echam6_ssp585_and_ssp534-over2_r1i1p1f1_gn_2015-2100.nc", label="C-534", col="#E41A1C")
-            ,list(fin="AWI-ESM-1-REcoM/fldmean/co2_burden/co2_burden_mon_fldmean_AWI-ESM-1-REcoM_echam6_esm-ssp126_r1i1p1f1_gn_2015-2100.nc", label="E-126", col="#377EB8")
-            ,list(fin="AWI-ESM-1-REcoM/fldmean/co2_burden/co2_burden_mon_fldmean_AWI-ESM-1-REcoM_echam6_esm-ssp585_and_esm-ssp534-over2_r1i1p1f1_gn_2015-2100.nc", label="E-534", col="#E41A1C")
+            list(fin=paste0(setup, "/fldmean/co2_burden/co2_burden_mon_fldmean_", setup, "_echam6_ssp126_r1i1p1f1_gn_2015-2100.nc"), label="C-126", col="#377EB8")
+            ,list(fin=paste0(setup, "/fldmean/co2_burden/co2_burden_mon_fldmean_", setup, "_echam6_ssp585_and_ssp534-over2_r1i1p1f1_gn_2015-2100.nc"), label="C-534", col="#E41A1C")
+            ,list(fin=paste0(setup, "/fldmean/co2_burden/co2_burden_mon_fldmean_", setup, "_echam6_esm-ssp126_r1i1p1f1_gn_2015-2100.nc"), label="E-126", col="#377EB8")
+            ,list(fin=paste0(setup, "/fldmean/co2_burden/co2_burden_mon_fldmean_", setup, "_echam6_esm-ssp585_and_esm-ssp534-over2_r1i1p1f1_gn_2015-2100.nc"), label="E-534", col="#E41A1C")
         ),
-        fout=paste0(pathplot, "/AWI-ESM-1-REcoM/fldmean/co2_burden/co2_burden_mon_fldmean_AWI-ESM-1-REcoM_echam6_C-E-126-534_2015-2100.png")
+        fout=paste0(pathplot, "/", setup, "/fldmean/co2_burden/co2_burden_mon_fldmean_", setup, "_echam6_C-E-126-534_2015-2100.png")
     )
 }
 
