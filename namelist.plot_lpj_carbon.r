@@ -50,7 +50,7 @@ if (T) {
 
 # post file `f` relative to `pathpost`: its 1st existing copy, else where it is made (under the 1st `pathpost`)
 ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
-fin <- function(v, dt, exp) paste0("lpj_guess/fldint/", v, "/", v, "_", dt, "_fldint_lpj_guess_", exp$experiment, "_r1i1p1f1_r360x180_", exp$from, "-", exp$to, ".nc")
+fin <- function(v, dt, exp) paste0("AWI-ESM-3-REcoM/fldint/", v, "/", v, "_", dt, "_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_r1i1p1f1_r360x180_", exp$from, "-", exp$to, ".nc")
 exps_str <- paste(sapply(experiments, "[[", "experiment"), collapse="_vs_")
 
 plots <- list()
@@ -60,7 +60,7 @@ if (T) { # per variable: experiments overlaid
         plots[[length(plots)+1]] <- list(
             datas=lapply(experiments, function(exp) list(fin=fin(x$v, x$dt, exp), label=exp$experiment, col=exp$col)),
             ylab=paste0(x$v, " [", x$unit, "]"),
-            fout=paste0(pathplot, "/lpj_guess/fldint/", x$v, "/", x$v, "_", x$dt, "_fldint_lpj_guess_", exps_str, "_<plot_from>-<plot_to>.png")
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/", x$v, "/", x$v, "_", x$dt, "_fldint_AWI-ESM-3-REcoM_lpj_guess_", exps_str, "_<plot_from>-<plot_to>.png")
         )
     }
 }
@@ -74,8 +74,8 @@ if (T) { # per experiment: the fluxes out of the land in the carbon budget (all 
                 list(fin=fin("wetlandCH4_monthly", "year", exp), label="wetlandCH4_monthly (as C)", col="blue")
             ),
             ylab="flux [PgC/yr] (>0: into atm)",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cflux_budget_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cflux_budget_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cflux_budget_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cflux_budget_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
@@ -90,8 +90,8 @@ if (T) { # per experiment: main fluxes (PgC/yr)
                 list(fin=fin("cflux_Fire", "year", exp), label="fire", col="red")
             ),
             ylab="flux [PgC/yr]",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cflux_main_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cflux_main_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cflux_main_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cflux_main_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
@@ -105,8 +105,8 @@ if (T) { # per experiment: all carbon flux components (cflux columns; sum = NEE;
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(paste0("cflux_", comps[i]), "year", exp), label=comps_labs[i], col=comp_cols[i], lwd=if (comps[i] == "NEE") 2 else 1)),
             ylab="flux [PgC/yr] (>0: into atm)",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cflux_components_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cflux_components_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cflux_components_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cflux_components_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
@@ -119,8 +119,8 @@ if (T) { # per experiment: all carbon pool components (sum = cLand_monthly)
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[[i]][1], comps[[i]][2], exp), label=comps[[i]][1], col=comp_cols[i])),
             ylab="pool [PgC]",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cpool_components_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cpool_components_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cpool_components_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cpool_components_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
@@ -131,8 +131,8 @@ if (F) { # per experiment: main land carbon pools (sum = cLand_monthly)
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=if (comps[i] == "cLand_monthly") "black" else comp_cols[i+1], lwd=if (comps[i] == "cLand_monthly") 2 else 1)),
             ylab="pool [PgC]",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cland_pools_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cland_pools_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cland_pools_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cland_pools_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
@@ -143,8 +143,8 @@ if (F) { # per experiment: cVeg per organ (sum = cVeg_monthly, incl. the npp not
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=comp_cols[i], lwd=if (comps[i] == "cVeg_monthly") 2 else 1)),
             ylab="cVeg [PgC]",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cveg_organs_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cveg_organs_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cveg_organs_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cveg_organs_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
@@ -162,8 +162,8 @@ if (T) { # per experiment: cVeg per plant type and their sum (excl. the not yet 
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=comp_cols[i], lwd=if (i == 4) 2 else 1)),
             ylab="cVeg [PgC]",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cveg_types_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cveg_types_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cveg_types_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cveg_types_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
@@ -176,8 +176,8 @@ if (T) { # per experiment: cLitter per pool (surf + subsurf = cLitter_monthly; c
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps_labs[i], col=comp_cols[i],
                                                              lty=if (comps[i] == "cLitterCwd_monthly") 2 else 1, lwd=if (comps[i] == "cLitter_monthly") 2 else 1)),
             ylab="cLitter [PgC]",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/clitter_pools_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/clitter_pools_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/clitter_pools_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/clitter_pools_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
@@ -188,8 +188,8 @@ if (T) { # per experiment: cSoil per pool (sum = cSoil_monthly)
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=comp_cols[i], lwd=if (comps[i] == "cSoil_monthly") 2 else 1)),
             ylab="cSoil [PgC]",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/csoil_pools_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/csoil_pools_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/csoil_pools_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/csoil_pools_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
@@ -215,8 +215,8 @@ if (T) { # per experiment: lpj's carbon budget without methane: d(cLand)/dt = -N
                 list(fin=fin("wetlandCH4_monthly", "year", exp), fac=-1, label="-wetlandCH4_monthly (as C)", col=comp_cols[3], lty=2)
             ),
             ylab="flux [PgC/yr] (>0: into land)",
-            #fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cland_budget_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess/fldint/cbudget/cland_budget_fldint_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cland_budget_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/fldint/cbudget/cland_budget_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }

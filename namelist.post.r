@@ -26,6 +26,7 @@ expand_jobs <- function(common, settings) lapply(settings, function(d) utils::mo
 if (F) { # awiesm3 raw fesom/recom
     jobs <- c(jobs, expand_jobs(
         common=list(
+            setup   = "AWI-ESM-3-REcoM",
             model   = "fesom",
             #fpattern   = "tra0004.nc",
             fpattern = "ssh.fesom.<year>.nc",
@@ -46,6 +47,7 @@ if (F) { # awiesm3 raw fesom/recom
 if (F) { # awiesm1 raw fesom/recom
     jobs <- c(jobs, expand_jobs(
         common=list(
+            setup   = "AWI-ESM-1-REcoM",
             model   = "fesom",
             #model   = "recom",
             fpattern   = "siarean_fesom_*<year>0101.nc", mode="select",
@@ -79,7 +81,8 @@ if (F) { # awiesm1 raw fesom/recom
 if (T) { # awiesm1 raw echam/jsbach
     jobs <- c(jobs, expand_jobs(
         common=list(
-            model   = "echam", varnamein="co2_burden", fpattern="*_<year><mon>.01_co2", code="*_<year><mon>.01_co2.codes", mode="fldmean",
+            setup   = "AWI-ESM-1-REcoM",
+            model   = "echam6", varnamein="co2_burden", fpattern="*_<year><mon>.01_co2", code="*_<year><mon>.01_co2.codes", mode="fldmean",
             #model   = "jsbach",
             pathout = "/work/ab1095/a270073/post"
         ),
@@ -120,7 +123,7 @@ if (T) { # awiesm1 raw echam/jsbach
 if (F) { # awiesm1 cmorized
     jobs <- c(jobs, expand_jobs(
         common=list(
-            model   = "AWI-ESM-1-REcoM",
+            setup   = "AWI-ESM-1-REcoM", # no `model`: cmorized
             fpattern   = "spco2_Omon_*_<from>01-<to>12.nc",
             mode    = "select",
             #mode    = "fldmean",

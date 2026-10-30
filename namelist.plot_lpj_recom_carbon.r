@@ -30,9 +30,9 @@ experiments <- list(
 
 # post file `f` relative to `pathpost`: its 1st existing copy, else where it is made (under the 1st `pathpost`)
 ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
-fin_lpj <- function(v, exp) paste0("lpj_guess/fldint/", v, "/", v, "_year_fldint_lpj_guess_", exp$experiment, "_r1i1p1f1_r360x180_", exp$from, "-", exp$to, ".nc")
-fin_recom <- function(v, exp) paste0("recom/fldsum/", v, "/", v, "_year_fldsum_recom_", exp$experiment, "_r1i1p1f1_core3_", exp$from, "-", exp$to, ".nc")
-fin_both <- function(v, exp) paste0("lpj_guess_recom/fldint/", v, "/", v, "_year_fldint_lpj_guess_recom_", exp$experiment, "_", exp$from, "-", exp$to, ".nc")
+fin_lpj <- function(v, exp) paste0("AWI-ESM-3-REcoM/fldint/", v, "/", v, "_year_fldint_AWI-ESM-3-REcoM_lpj_guess_", exp$experiment, "_r1i1p1f1_r360x180_", exp$from, "-", exp$to, ".nc")
+fin_recom <- function(v, exp) paste0("AWI-ESM-3-REcoM/fldsum/", v, "/", v, "_year_fldsum_AWI-ESM-3-REcoM_recom_", exp$experiment, "_r1i1p1f1_core3_", exp$from, "-", exp$to, ".nc")
+fin_both <- function(v, exp) paste0("AWI-ESM-3-REcoM/fldint/", v, "/", v, "_year_fldint_AWI-ESM-3-REcoM_lpj_guess_recom_", exp$experiment, "_", exp$from, "-", exp$to, ".nc")
 
 comp_cols <- c("black", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "grey50", "red")
 plots <- list()
@@ -66,8 +66,8 @@ if (T) { # per experiment: d(cLand + cOcean)/dt = -NEE + CO2f + residual, residu
             ),
             ylab="flux [PgC/yr] (>0: into land/ocean)",
             plot_from=exp$plot_from, plot_to=exp$plot_to, plot_ma=T, ma_opts=list(align="right"),
-            #fout=paste0(pathplot, "/lpj_guess_recom/cbudget/cland_cocean_budget_lpj_guess_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
-            fout=paste0(pathplot, "/lpj_guess_recom/cbudget/cland_cocean_budget_lpj_guess_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+            #fout=paste0(pathplot, "/AWI-ESM-3-REcoM/cbudget/cland_cocean_budget_AWI-ESM-3-REcoM_lpj_guess_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+            fout=paste0(pathplot, "/AWI-ESM-3-REcoM/cbudget/cland_cocean_budget_AWI-ESM-3-REcoM_lpj_guess_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }

@@ -113,6 +113,10 @@
 #   mode       - "select" (no reduction, just pick the variable), or any cdo
 #                statistic operator name, e.g. "fldmean", "fldint", "fldsum",
 #                "fldstd", "zonmean", "yearmean", "timmean"
+#   mode_name  - [optional, default = mode] name of the statistic in `fout` and
+#                `pathout` instead of `mode`, e.g. mode="fldsum" with
+#                normalized weights multiplied in `cdo_pre` is a weighted
+#                field mean --> mode_name="fldmean"
 #   mode_args  - [optional] arguments appended to `mode`, e.g. mode="zonmean",
 #                mode_args="zonal_1" --> "-zonmean,zonal_1"
 #   dtin       - [optional] override for `fout`'s "<dtin>" segment (see
@@ -158,24 +162,30 @@
 #                unit-conversion operator, but not equivalent to a single
 #                run-once-at-the-end call for an operator that is itself
 #                sensitive to that split (e.g. a further temporal one).
-#   model,
+#   setup,
 #   experiment - used in the default `fout` name/`pathout` dirs below
-#                (CMIP6/CMOR-like); no generic default, e.g.
-#                model="AWI-ESM-1-REcoM", experiment="ssp126"
+#                (CMIP6/CMOR-like); no generic default. `setup` is the whole
+#                model setup, e.g. setup="AWI-ESM-1-REcoM", experiment="ssp126"
+#   model      - [optional, default none] model component within `setup`
+#                whose output is processed, e.g. "fesom", "recom", "echam6",
+#                "jsbach", "lpj_guess"; appended to `setup` in the default
+#                `fout` name as "<setup>_<model>"; unset for output not
+#                belonging to a single component (e.g. cmorized CMIP6 data)
 #   variant    - [optional, default = "r1i1p1f1"] used in the default `fout`
 #                name below
 #   grid       - [optional, default = "gn"] used in the default `fout` name
 #                below (e.g. "gn" native, "gr1" regridded)
 #   pathout    - [optional, default = pathin up to any "{"] output directory. Whatever is
-#                given (or defaulted to `pathin`) has "/<model>/<mode>/<varnameout>"
+#                given (or defaulted to `pathin`) has "/<setup>/<mode>/<varnameout>"
 #                appended, unless it already ends in exactly that (so a
 #                `pathout` already constructed that way by the caller is
 #                left alone, not doubled up).
 #   do         - [optional, default = T] if F, the job is skipped (e.g. to
 #                switch off 1 dataset of a group without commenting it out)
 #   fout       - [optional] output filename; default, CMIP6/CMOR-like:
-#                "<pathout>/<varnameout>_<dtin>_<mode>_<depth>_<model>_<experiment>_<variant>_<grid>_<from>-<to>.nc"
-#                e.g. "spco2_mon_fldmean_AWI-ESM-1-REcoM_ssp126_r1i1p1f1_gr1_2015-2100.nc".
+#                "<pathout>/<varnameout>_<dtin>_<mode>_<depth>_<setup>_<model>_<experiment>_<variant>_<grid>_<from>-<to>.nc"
+#                e.g. "CO2f_mon_fldint_AWI-ESM-1-REcoM_recom_esm-ssp585_r1i1p1f1_gn_2015-2100.nc", or
+#                "spco2_mon_fldmean_AWI-ESM-1-REcoM_ssp126_r1i1p1f1_gr1_2015-2100.nc" without `model`.
 #                <depth> is `level` above (any "," replaced by "-"), omitted
 #                entirely (along with its surrounding "_") when `level` is
 #                unset, as for a surface variable. <dtin> is the *input*
@@ -244,8 +254,8 @@ if (!user_set("jobs")) stop("must provide a `jobs` list before sourcing post.r; 
 # misspelt field (e.g. "fpatern"), which a shared `common` list passes on to
 # every job built from it
 known_fields <- c("pathin", "fpattern", "from", "to", "varnamein", "varnameout",
-                  "mode", "mode_args", "dtin", "level", "code", "cdo_pre", "cdo_post",
-                  "model", "experiment", "variant", "grid", "pathout", "fout", "do")
+                  "mode", "mode_name", "mode_args", "dtin", "level", "code", "cdo_pre", "cdo_post",
+                  "setup", "model", "experiment", "variant", "grid", "pathout", "fout", "do")
 if (!is.list(jobs) || length(jobs) == 0) stop("`jobs` must be a non-empty list of jobs")
 for (jobi in seq_along(jobs)) {
     if (!is.list(jobs[[jobi]]) || is.null(names(jobs[[jobi]])) || any(!nzchar(names(jobs[[jobi]])))) {
@@ -268,7 +278,9 @@ cdo_can_chain <- cdo_version >= base::numeric_version("1.9.4")
 message("cdo = ", cdo, " (version ", cdo_version, ", ", if (!cdo_can_chain) "cannot" else "can", " chain selection+statistic)")
 
 # ---- max cdo/nco command-line length, to detect "Argument list too long" up front ----
-cdo_nchar_max_arglist <- trunc(0.9*as.integer(system("getconf ARG_MAX", intern=T))) # 10% safety margin
+# `system()` runs a command as `sh -c "<cmd>"`, i.e. the whole command is 1 argument, and linux limits a single
+# argument to MAX_ARG_STRLEN = 32 pages = 131072 bytes (fails with exit status 127), independent of the larger ARG_MAX
+cdo_nchar_max_arglist <- trunc(0.9*min(as.integer(system("getconf ARG_MAX", intern=T)), 131072)) # 10% safety margin
 
 ##################################################################################
 
@@ -542,10 +554,19 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
     if (length(missing_dirs) > 0) message("--> `pathin` director", if (length(missing_dirs) == 1) "y" else "ies",
                                           " not found --> skip:\n", paste(missing_dirs, collapse="\n"))
     pathins <- pathins[dir.exists(pathins)]
-    message("--> run base::list.files(pathins, recursive=T, full.names=T, pattern=\"", re_tre, "\") in `pathin` director",
+    # recursive listing via `find` instead of `list.files(recursive=T)`: the latter stats every entry to check if it
+    # is a directory, which takes minutes on lustre for e.g. an echam outdata dir of 350k files; `find` gets the type
+    # from the directory listing itself (0.1 s instead of 2 min). Like `list.files()`, `find` does not follow
+    # symlinked directories here and `pattern` is matched against the basename
+    message("--> run `find pathins -mindepth 1 ! -type d` and keep basenames matching \"", re_tre, "\" in `pathin` director",
             if (length(pathins) == 1) "y" else "ies", " (specify a clearer `pathin` if this takes too long). pathins:\n",
             paste(pathins, collapse="\n"))
-    all_files <- if (length(pathins) > 0) base::list.files(pathins, recursive=T, full.names=T, pattern=re_tre) else character(0)
+    all_files <- if (length(pathins) > 0) {
+        system2("find", c(shQuote(pathins), "-mindepth", "1", "!", "-type", "d"), stdout=T)
+    } else {
+        character(0)
+    }
+    all_files <- sort(all_files[grepl(re_tre, basename(all_files))])
     all_files <- all_files[grepl(re, path_tail(all_files), perl=T)]
     if (length(all_files) == 0) { # NULL --> caller skips this job
         warning("job ", jobi, ": no files matching \"", re, "\" under \"", pathin, "\" --> skip job", call.=F, immediate.=T)
@@ -819,12 +840,13 @@ for (jobi in seq_along(jobs)) {
     }
 
     # check required fields ("varnamein"/"from"/"to" are not among them -- see below)
-    required <- c("pathin", "fpattern", "mode", "model", "experiment")
+    required <- c("pathin", "fpattern", "mode", "setup", "experiment")
     missing <- required[!sapply(required, function(f) !is.null(job_get(job, f)))]
     if (length(missing) > 0) stop("job ", jobi, " is missing required field(s): ", paste(missing, collapse=", "))
 
     mode <- job_get(job, "mode")
     mode_args <- job_get(job, "mode_args", "")
+    mode_name <- job_get(job, "mode_name", mode)
     level <- job_get(job, "level", "")
     codes <- job_get(job, "code", "") # resolved below
     cdo_pre <- job_get(job, "cdo_pre", "")
@@ -863,13 +885,13 @@ for (jobi in seq_along(jobs)) {
     varnameout <- job_get(job, "varnameout", varnamein)
 
     # `pathout` (given, or defaulted to `pathin`) always ends in
-    # "/<model>/<mode>/<varnameout>" -- appended unless it's already exactly
+    # "/<setup>/<mode>/<varnameout>" -- appended unless it's already exactly
     # that (compared component-by-component on the *trailing* path parts,
     # not a plain string suffix match, so e.g. a `pathout` that merely ends
     # in "...xspco2" is not mistaken for already ending in ".../spco2")
     pathout <- job_get(job, "pathout", pathin_base(job_get(job, "pathin")))
     pathout_parts <- strsplit(sub("/+$", "", pathout), "/")[[1]]
-    required_tail <- c(job_get(job, "model"), mode, varnameout)
+    required_tail <- c(job_get(job, "setup"), mode_name, varnameout)
     if (!identical(utils::tail(pathout_parts, 3), required_tail)) {
         pathout <- paste0(sub("/+$", "", pathout), "/", paste(required_tail, collapse="/"))
     }
@@ -891,7 +913,7 @@ for (jobi in seq_along(jobs)) {
     if (is.null(fout_given)) {
         dtin <- job_get(job, "dtin", get_dt_from_file(files, from, to))
         depth <- if (nzchar(level)) gsub(",", "-", level, fixed=T) else ""
-        segs <- c(varnameout, dtin, mode, depth, job_get(job, "model"), job_get(job, "experiment"), variant, grid)
+        segs <- c(varnameout, dtin, mode_name, depth, job_get(job, "setup"), job_get(job, "model", ""), job_get(job, "experiment"), variant, grid)
         fout <- paste0(pathout, "/", paste(segs[nzchar(segs)], collapse="_"), "_", from, "-", to, ".nc")
     } else {
         fout <- paste0(pathout, "/", fout_given)

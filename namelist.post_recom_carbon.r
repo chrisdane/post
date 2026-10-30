@@ -45,6 +45,7 @@ jobs <- list()
 for (exp in experiments) {
     for (x in vars) {
         jobs[[length(jobs) + 1]] <- list(
+            setup      = "AWI-ESM-3-REcoM",
             model      = "recom",
             experiment = exp$experiment,
             pathin     = exp$pathin,

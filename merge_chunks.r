@@ -1,7 +1,7 @@
 # r
 
 # Merge post.r output files that are "the same thing" (same variable, dtin,
-# mode, depth, model, experiment, variant, grid -- i.e. identical filename
+# mode, depth, setup, model, experiment, variant, grid -- i.e. identical filename
 # except for the trailing "<from>-<to>" chunk), covering different,
 # non-overlapping time chunks, into 1 file spanning their combined range.
 # Needed e.g. after an experiment's `outdata` got split across several
