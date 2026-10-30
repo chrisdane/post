@@ -115,6 +115,9 @@
 #                "fldstd", "zonmean", "yearmean", "timmean"
 #   mode_args  - [optional] arguments appended to `mode`, e.g. mode="zonmean",
 #                mode_args="zonal_1" --> "-zonmean,zonal_1"
+#   dtin       - [optional] override for `fout`'s "<dtin>" segment (see
+#                `fout` below) -- only needed if `cdo_pre` itself changes
+#                the data's temporal frequency
 #   level      - [optional] a single height/depth level or a comma-separated
 #                list of levels to select, in the units of the input's own
 #                vertical axis, e.g. level="50" or level="0,10,50". Applied
@@ -177,11 +180,17 @@
 #                entirely (along with its surrounding "_") when `level` is
 #                unset, as for a surface variable. <dtin> is the *input*
 #                data's own temporal frequency, e.g. "day"/"mon"/"year" --
-#                always inferred from the input files themselves (see
+#                by default inferred from the input files themselves (see
 #                `get_dt_from_file()`), regardless of `mode`, including its fallback
 #                for the case where even 1 whole input file holds only a
 #                single usable time step, where no within-file step can be
-#                diffed at all. <mode> is `mode` verbatim (e.g. "select",
+#                diffed at all. Override with `dtin` below if `cdo_pre`
+#                itself changes the data's frequency (e.g. a `-yearmonmean`
+#                in `cdo_pre` turns monthly input into annual data *before*
+#                `mode`'s own statistic ever sees it -- `get_dt_from_file()`
+#                would still report "mon", the input files' own real
+#                frequency, mislabeling the actual (now annual) output).
+#                <mode> is `mode` verbatim (e.g. "select",
 #                "fldmean", "yearmean") -- shown separately from <dtin> since
 #                a temporal-reduction `mode` (e.g. "yearmean") changes the
 #                output's actual resolution without changing <dtin>, which
@@ -235,7 +244,7 @@ if (!user_set("jobs")) stop("must provide a `jobs` list before sourcing post.r; 
 # misspelt field (e.g. "fpatern"), which a shared `common` list passes on to
 # every job built from it
 known_fields <- c("pathin", "fpattern", "from", "to", "varnamein", "varnameout",
-                  "mode", "mode_args", "level", "code", "cdo_pre", "cdo_post",
+                  "mode", "mode_args", "dtin", "level", "code", "cdo_pre", "cdo_post",
                   "model", "experiment", "variant", "grid", "pathout", "fout", "do")
 if (!is.list(jobs) || length(jobs) == 0) stop("`jobs` must be a non-empty list of jobs")
 for (jobi in seq_along(jobs)) {
@@ -736,22 +745,21 @@ cdo_prefix <- function(codes) {
 # one).
 cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_i) {
     calc <- mode_to_calc(mode, mode_args)
-    sel <- paste0("-setname,", varnameout, " ", sel_op(varnamein, level, from, to, needs_year_filter))
+    sel <- sel_op(varnamein, level, from, to, needs_year_filter)
     filestr <- paste(files, collapse=" ")
 
     if (cdo_can_chain) {
-        cmd <- paste0(cdo_prefix(codes), " ", cdo_post, " ", calc, " ", cdo_pre, " ", sel, " ", filestr, " ", fout_i)
+        cmd <- paste0(cdo_prefix(codes), " ", cdo_post, " -setname,", varnameout, " ", calc, " ", cdo_pre, " ", sel, " ", filestr, " ", fout_i)
         cmd <- gsub("[[:space:]]+", " ", cmd) # tidy up in case any piece was ""
         run_cmd(cmd, files)
+    } else if (mode == "select" && !nzchar(cdo_post)) {
+        # nothing beyond the rename needed -- select+rename straight into `fout_i`, no 2nd cdo call
+        run_cmd(gsub("[[:space:]]+", " ", paste0(cdo_prefix(codes), " -setname,", varnameout, " ", cdo_pre, " ", sel, " ", filestr, " ", fout_i)), files)
     } else {
         tmpfile <- paste0(tools::file_path_sans_ext(fout_i), "_tmp_select_", Sys.getpid(), ".nc")
         run_cmd(gsub("[[:space:]]+", " ", paste0(cdo_prefix(codes), " ", cdo_pre, " ", sel, " ", filestr, " ", tmpfile)), files)
-        if (mode == "select" && !nzchar(cdo_post)) {
-            run_cmd(paste0(if (clean) "mv " else "cp ", tmpfile, " ", fout_i))
-        } else {
-            run_cmd(gsub("[[:space:]]+", " ", paste0(cdo, " --pedantic -P ", cdo_nthreads, " ", cdo_post, " ", calc, " ", tmpfile, " ", fout_i)))
-            if (clean) run_cmd(paste0("rm ", tmpfile))
-        }
+        run_cmd(gsub("[[:space:]]+", " ", paste0(cdo, " --pedantic -P ", cdo_nthreads, " ", cdo_post, " -setname,", varnameout, " ", calc, " ", tmpfile, " ", fout_i)))
+        if (clean) run_cmd(paste0("rm ", tmpfile))
     }
 } # cdo_select_calc_1cmd
 
@@ -761,8 +769,8 @@ cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, 
 # back together into 1 final `fout` (chunk count 1 is the common case: just
 # runs directly, no cat needed).
 cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout) {
-    nchar_fixed <- nchar(paste0(cdo_prefix(codes), " ", cdo_post, " ", mode_to_calc(mode, mode_args), " ", cdo_pre,
-                                " -setname,", varnameout, " ", sel_op(varnamein, level, from, to, needs_year_filter), " ", fout))
+    nchar_fixed <- nchar(paste0(cdo_prefix(codes), " ", cdo_post, " -setname,", varnameout, " ", mode_to_calc(mode, mode_args), " ", cdo_pre,
+                                " ", sel_op(varnamein, level, from, to, needs_year_filter), " ", fout))
     nchar_per_file <- nchar(files) + 1L # +1 for the separating space
     nchar_total <- nchar_fixed + sum(nchar_per_file)
 
@@ -881,7 +889,7 @@ for (jobi in seq_along(jobs)) {
 
     fout_given <- job_get(job, "fout")
     if (is.null(fout_given)) {
-        dtin <- get_dt_from_file(files, from, to)
+        dtin <- job_get(job, "dtin", get_dt_from_file(files, from, to))
         depth <- if (nzchar(level)) gsub(",", "-", level, fixed=T) else ""
         segs <- c(varnameout, dtin, mode, depth, job_get(job, "model"), job_get(job, "experiment"), variant, grid)
         fout <- paste0(pathout, "/", paste(segs[nzchar(segs)], collapse="_"), "_", from, "-", to, ".nc")

@@ -32,6 +32,13 @@
 #     fac      - [optional] factor the data is multiplied with, e.g. -1 to flip the sign; default: 1
 #     plot_from, plot_to - [optional] overrides the plot-level `plot_from`/`plot_to` (see below) for just this dataset
 #     col, lty, lwd - [optional] line plots only
+#     ma       - [optional] line plots only; list(nyrs=, align=) overriding,
+#                for just this dataset, the plot-level `ma_opts` (see below),
+#                itself overriding config `ma_nyrs`/"center", used for the
+#                `plot_ma` running-mean output; align: "center" (default,
+#                centered window) or "right" (trailing window, filling the
+#                start via an expanding window instead of leaving it
+#                unplotted, like `zoo::rollapply(align="right", partial=T)`)
 #   plot_from,
 #   plot_to - [optional] inclusive calendar-year range to actually plot, e.g.
 #             plot_from=1900, plot_to=2000 -- restricts a dataset's time dim
@@ -51,12 +58,25 @@
 #             a `legend()` keyword or c(x, y)
 #   legend_ncol, legend_cex - [optional] default: 2 and 0.8 if more than 5 datasets, else 1 and 1
 #   legend_x_intersp - [optional] space between line and text in character widths; default: 0.5
+#   plot_ma - [optional] if T, also save a running-mean version of this plot
+#             next to the normal one (same `fout`(s), with "_ma<nyrs>" inserted
+#             before the extension, <nyrs> = the plot's/config's `ma_opts`/
+#             `ma_nyrs` -- a dataset's own differing `ma$nyrs` isn't reflected
+#             in the name) -- analogous to post.r's `save_fout_an` saving an
+#             additional annual-mean `fout_an` next to `fout`. Only applies to
+#             a non-pairwise line plot with an actual time axis (ignored
+#             otherwise, same as any dataset's `ma`, above). default: config
+#             `plot_ma` (below), itself default F
+#   ma_opts - [optional] list(nyrs=, align=) default running-mean settings for
+#             every dataset in `datas` that doesn't set its own `ma` (above);
+#             itself overrides config `ma_nyrs`/"center"
 #   zlim, nlevels, n, m - [optional] contour plots only; passed to image.plot.pre()/image.plot.nxm()
 
 message("\n****************** plot.r start ******************")
 
-message("\nload ncdf4 ...")
+message("\nload ncdf4, data.table ...")
 library(ncdf4)
+library(data.table) # frollmean(), for `plot_ma`
 message("source myfunctions.r, image.plot.pre.r, image.plot.nxm.r ...")
 source("~/scripts/r/functions/myfunctions.r")
 source("~/scripts/r/functions/image.plot.pre.r")
@@ -91,6 +111,8 @@ if (!user_set("tcl")) tcl <- -0.3 # tick length (default: -0.5)
 if (!user_set("pathpost")) pathpost <- "" # where to search a `fin` given as bare file name
 if (!user_set("plot_from")) plot_from <- NULL # [optional] restrict ALL plots to just this calendar-year range by default (reads only the needed time steps); overridden by a plot's/dataset's own `plot_from`/`plot_to`
 if (!user_set("plot_to")) plot_to <- NULL
+if (!user_set("plot_ma")) plot_ma <- F # if T (or a plot's own `plot_ma`): also save a running-mean version of each eligible (time series) plot; see header
+if (!user_set("ma_nyrs")) ma_nyrs <- 21 # [default] running-mean window length in years; overridable per-dataset via that dataset's own `ma$nyrs`
 
 ##################################################################################
 
@@ -403,11 +425,11 @@ for (ploti in seq_along(plots)) {
         message("--> plot \"", fout, "\" ...")
 
         ext <- tolower(tools::file_ext(fout))
-        open_dev <- function(width, height) {
+        open_dev <- function(width, height, path=fout) {
             if (ext == "png") {
-                grDevices::png(fout, width=width, height=height, res=res, family=family_png)
+                grDevices::png(path, width=width, height=height, res=res, family=family_png)
             } else if (ext == "pdf") {
-                grDevices::cairo_pdf(fout, width=width/res, height=height/res, family=family_pdf)
+                grDevices::cairo_pdf(path, width=width/res, height=height/res, family=family_pdf)
             }
             par(mgp=mgp, tcl=tcl)
         }
@@ -457,58 +479,111 @@ for (ploti in seq_along(plots)) {
                 yaxis(usr_at(2), data_label(datas[[2]]))
                 abline(h=0, v=0, col="gray", lwd=0.5)
                 lines(x, y, col=job_get(job_datas[[1]], "col", default_cols[1]), lwd=job_get(job_datas[[1]], "lwd", 1))
+                message("run `my_dev.off(", fout, ") ...")
+                my_dev.off(fout)
             } else {
                 xvals_list <- lapply(datas, function(dm) maybe_time_axis(dm$dims[1], dm$dimvals[[1]], dm$dimunits[1]))
                 is_time <- inherits(xvals_list[[1]], "POSIXct")
-                yr <- range(sapply(datas, function(x) range(x$data, finite=T, na.rm=T)))
-                xr <- range(if (is_time) do.call(c, xvals_list) else unlist(xvals_list), finite=T)
-                set_ymar(yr)
-                graphics::plot(0, type="n", xlim=xr, ylim=yr,
-                     xlab="", ylab="", xaxt="n", yaxt="n")
-                if (is_time) {
-                    axis.POSIXct(1, at=usr_at(1, time=T), format="%Y")
-                    xtitle("year")
-                } else {
-                    axis(1, at=usr_at(1))
-                    xtitle(axis_label(datas[[1]]$dims[1], datas[[1]]$dimunits[1]))
-                }
-                yaxis(usr_at(2), job_get(job, "ylab", data_label(datas[[1]])))
-                abline(h=0, col="gray", lwd=0.5)
-                for (datai in seq_len(ndata)) {
-                    dj <- job_datas[[datai]]
-                    col <- job_get(dj, "col", default_cols[(datai - 1) %% length(default_cols) + 1])
-                    lty <- job_get(dj, "lty", 1)
-                    lwd <- job_get(dj, "lwd", 1)
-                    lines(xvals_list[[datai]], as.vector(datas[[datai]]$data), col=col, lty=lty, lwd=lwd)
-                }
-                if (ndata > 1) {
-                    pos <- job_get(job, "legend_pos", "my_maxempty")
-                    if (identical(pos, "my_maxempty")) {
-                        pos <- tryCatch(my_maxempty(lapply(xvals_list, as.numeric), lapply(datas, function(dm) as.vector(dm$data))),
-                                        error=function(e) {
-                                            message("`my_maxempty()` failed (", conditionMessage(e), ") --> legend at \"topleft\"")
-                                            "topleft"
-                                        })
+
+                # draws 1 version of this line-vs-time(/dim) plot into the
+                # currently open device, using whatever `$data` is in
+                # `datas_draw` -- shared between the normal (raw `datas`) and,
+                # if `plot_ma`, the running-mean (`datas_ma`, below) render,
+                # which otherwise differ only in that 1 field
+                draw_ts <- function(datas_draw) {
+                    yr <- range(sapply(datas_draw, function(x) range(x$data, finite=T, na.rm=T)))
+                    xr <- range(if (is_time) do.call(c, xvals_list) else unlist(xvals_list), finite=T)
+                    set_ymar(yr)
+                    graphics::plot(0, type="n", xlim=xr, ylim=yr,
+                         xlab="", ylab="", xaxt="n", yaxt="n")
+                    if (is_time) {
+                        axis.POSIXct(1, at=usr_at(1, time=T), format="%Y")
+                        xtitle("year")
+                    } else {
+                        axis(1, at=usr_at(1))
+                        xtitle(axis_label(datas_draw[[1]]$dims[1], datas_draw[[1]]$dimunits[1]))
                     }
-                    if (is.numeric(pos)) pos <- list(x=pos[1], y=pos[2])
-                    lg_args <- list(legend=sapply(datas, "[[", "label"),
-                                    col=sapply(seq_len(ndata), function(i) job_get(job_datas[[i]], "col", default_cols[(i - 1) %% length(default_cols) + 1])),
-                                    lty=sapply(job_datas, function(dj) job_get(dj, "lty", 1)),
-                                    lwd=sapply(job_datas, function(dj) job_get(dj, "lwd", 1)), bty="n",
-                                    ncol=job_get(job, "legend_ncol", if (ndata > 5) 2 else 1),
-                                    cex=job_get(job, "legend_cex", if (ndata > 5) 0.8 else 1),
-                                    x.intersp=job_get(job, "legend_x_intersp", 0.5))
-                    if (is.list(pos)) { # keep the whole legend inside the plot
-                        usr <- par("usr")
-                        r <- do.call(legend, c(list(x=pos$x, y=pos$y, plot=F), lg_args))$rect
-                        pos$x <- max(usr[1], min(pos$x, usr[2] - r$w))
-                        pos$y <- min(usr[4], max(pos$y, usr[3] + r$h))
+                    yaxis(usr_at(2), job_get(job, "ylab", data_label(datas_draw[[1]])))
+                    abline(h=0, col="gray", lwd=0.5)
+                    for (datai in seq_len(ndata)) {
+                        dj <- job_datas[[datai]]
+                        col <- job_get(dj, "col", default_cols[(datai - 1) %% length(default_cols) + 1])
+                        lty <- job_get(dj, "lty", 1)
+                        lwd <- job_get(dj, "lwd", 1)
+                        lines(xvals_list[[datai]], as.vector(datas_draw[[datai]]$data), col=col, lty=lty, lwd=lwd)
                     }
-                    do.call(legend, c(list(x=pos), lg_args))
+                    if (ndata > 1) {
+                        pos <- job_get(job, "legend_pos", "my_maxempty")
+                        if (identical(pos, "my_maxempty")) {
+                            pos <- tryCatch(my_maxempty(lapply(xvals_list, as.numeric), lapply(datas_draw, function(dm) as.vector(dm$data))),
+                                            error=function(e) {
+                                                message("`my_maxempty()` failed (", conditionMessage(e), ") --> legend at \"topleft\"")
+                                                "topleft"
+                                            })
+                        }
+                        if (is.numeric(pos)) pos <- list(x=pos[1], y=pos[2])
+                        lg_args <- list(legend=sapply(datas_draw, "[[", "label"),
+                                        col=sapply(seq_len(ndata), function(i) job_get(job_datas[[i]], "col", default_cols[(i - 1) %% length(default_cols) + 1])),
+                                        lty=sapply(job_datas, function(dj) job_get(dj, "lty", 1)),
+                                        lwd=sapply(job_datas, function(dj) job_get(dj, "lwd", 1)), bty="n",
+                                        ncol=job_get(job, "legend_ncol", if (ndata > 5) 2 else 1),
+                                        cex=job_get(job, "legend_cex", if (ndata > 5) 0.8 else 1),
+                                        x.intersp=job_get(job, "legend_x_intersp", 0.5))
+                        if (is.list(pos)) { # keep the whole legend inside the plot
+                            usr <- par("usr")
+                            r <- do.call(legend, c(list(x=pos$x, y=pos$y, plot=F), lg_args))$rect
+                            pos$x <- max(usr[1], min(pos$x, usr[2] - r$w))
+                            pos$y <- min(usr[4], max(pos$y, usr[3] + r$h))
+                        }
+                        do.call(legend, c(list(x=pos), lg_args))
+                    }
+                } # draw_ts
+
+                draw_ts(datas)
+                message("run `my_dev.off(", fout, ") ...")
+                my_dev.off(fout)
+
+                # `plot_ma`: also save a running-mean version of this same
+                # plot, analogous to post.r's `save_fout_an` -- only makes
+                # sense for an actual time axis, not an arbitrary dim
+                job_plot_ma <- job_get(job, "plot_ma", plot_ma)
+                if (job_plot_ma && is_time) {
+                    job_ma_opts <- job_get(job, "ma_opts", list()) # plot-level default, cascades to any dataset without its own `ma`
+                    job_ma_nyrs <- job_get(job_ma_opts, "nyrs", ma_nyrs) # nominal window (years) for `fout_ma`'s name -- a dataset's own `ma$nyrs` (if any) can still differ, this is just the label
+                    fout_ma <- sub("(\\.[^./]+)$", paste0("_ma", job_ma_nyrs, "\\1"), fout)
+                    if (fout_ma == fout) stop("plot ", ploti, ": could not derive a \"_ma\" `fout` from \"", fout, "\"")
+                    if (file.exists(fout_ma) && !force) {
+                        message("--> `plot_ma` = T but \"", fout_ma, "\" already exists and `force` = F --> skip")
+                    } else {
+                        message("--> `plot_ma` = T: also plot a running-mean version --> \"", fout_ma, "\" ...")
+                        datas_ma <- lapply(seq_len(ndata), function(datai) {
+                            dm <- datas[[datai]]
+                            ma_cfg <- job_get(job_datas[[datai]], "ma", list())
+                            ma_opts <- list(nyrs=job_get(ma_cfg, "nyrs", job_ma_nyrs),
+                                       method="data.table::frollmean", # fastest of the options considered; handles NA; fills start/end only for align="right" (`adaptive=T`, below)
+                                       align=job_get(ma_cfg, "align", job_get(job_ma_opts, "align", "center")))
+                            yvals <- as.vector(dm$data)
+                            dt_secs <- stats::median(diff(as.numeric(xvals_list[[datai]])))
+                            n <- if (is.na(dt_secs) || dt_secs <= 0) NA_integer_ else as.integer(max(1, round(ma_opts$nyrs*365.2425*86400/dt_secs)))
+                            if (is.na(n) || n < 2) {
+                                message("--> data ", datai, ": could not derive a running-mean window (dt = ", dt_secs, " s) --> leave unsmoothed")
+                            } else if (ma_opts$align == "right") {
+                                # fills the start via an expanding window instead of leaving it unplotted, like `zoo::rollapply(align="right", partial=T)`
+                                dm$data <- data.table::frollmean(yvals, n=pmin(seq_along(yvals), n), align="right", na.rm=T, adaptive=T)
+                            } else {
+                                dm$data <- data.table::frollmean(yvals, n=n, align=ma_opts$align, na.rm=T)
+                            }
+                            dm
+                        })
+                        open_dev(line_width, line_height, path=fout_ma)
+                        draw_ts(datas_ma)
+                        message("run `my_dev.off(", fout_ma, ") ...")
+                        my_dev.off(fout_ma)
+                        if (!file.exists(fout_ma)) stop("plot ", ploti, ": `fout_ma` = \"", fout_ma, "\" was not created")
+                        message("--> done: \"", fout_ma, "\"")
+                    }
                 }
             }
-            message("run `my_dev.off(", fout, ") ...")
-            my_dev.off(fout)
 
         } else if (all(ndims == 2)) {
 

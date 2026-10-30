@@ -20,9 +20,10 @@ if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
 #####################################################################################################
 
 experiments <- list(
-    list(experiment="pi_noxios", from=1850, to=1858)
-    #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059)
+    #list(experiment="pi_noxios", from=1850, to=1858)
     #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059, plot_to=1880)
+    #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", from=2230, to=2389) # from: 2230
+    list(experiment="AE3CC_pi", from=1850, to=2389)
 )
 
 #####################################################################################################
@@ -64,7 +65,7 @@ if (T) { # per experiment: d(cLand + cOcean)/dt = -NEE + CO2f + residual, residu
                 list(fin=ppost(fin_lpj("wetlandCH4_monthly", exp)), fac=-1, label="-wetland CH4 (as C)", col=comp_cols[8], lty=2)
             ),
             ylab="flux [PgC/yr] (>0: into land/ocean)",
-            plot_from=exp$plot_from, plot_to=exp$plot_to,
+            plot_from=exp$plot_from, plot_to=exp$plot_to, plot_ma=T, ma_opts=list(align="right"),
             #fout=paste0(pathplot, "/lpj_guess_recom/cbudget/cland_cocean_budget_lpj_guess_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/lpj_guess_recom/cbudget/cland_cocean_budget_lpj_guess_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )

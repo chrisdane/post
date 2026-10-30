@@ -3,7 +3,7 @@
 # Plots of the REcoM carbon time series made by namelist.post_recom_carbon.r.
 # Run with: `Rscript namelist.plot_recom_carbon.r`
 
-force <- F # default: F; set T to redo even if fout already exists
+force <- T # default: F; set T to redo even if fout already exists
 
 hostname <- Sys.info()["nodename"]
 if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
@@ -21,7 +21,9 @@ if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
 # experiments as in namelist.post_recom_carbon.r; overlaid in the per-variable plots
 experiments <- list(
     #list(experiment="pi_noxios", from=1850, to=1858, col="black")
-    list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059, col="black")
+    #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2229, col="black")
+    #,list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", from=2230, to=2389, col="black") # from: 2230
+    list(experiment="AE3CC_pi", from=1850, to=2389, col="black") # 1850-2389 complete range: continues from 2230 (v3.5.1-cc) where the experiment above (v3.5.0-cc) stops at 2339 -- both overlaid 2230-2339 since they're different model versions, not the same data
 )
 
 # all annual means of the monthly output
