@@ -1,259 +1,54 @@
 # r
 
-# Generic post-processing of gridded model output (any model, not just echam):
-# construct and run cdo (and, if needed, nco) commands that either select a
-# variable from a set of input files (mode = "select") or reduce it with a
-# cdo statistic (mode = "fldmean", "fldint", "fldsum", "zonmean", "yearmean",
-# "timmean", ...).
+# generic post-processing of model output with cdo: select a variable (mode = "select") or apply a cdo
+# statistic (mode = "fldmean", "fldint", "zonmean", "yearmean", ...)
+# usage: set `jobs` (and optional config) in a namelist.post.r, then source this file
 #
-# Condensed rewrite of ~/scripts/r/echam/post_echam.r, keeping only the two
-# mechanisms actually named as needing special treatment there, generalized:
-#   1. many input files can make the cdo command line exceed the OS's
-#      ARG_MAX --> split the file list into chunks that fit, run one cdo
-#      command per chunk, then `cdo cat` the chunk outputs back together.
-#   2. cdo versions before 1.9.4 cannot chain a selection and a statistic
-#      into one command (`-fldmean -select,name=... <files> <fout>`) -->
-#      fall back to two separate commands (select to a temp file, then the
-#      statistic on that file) for old cdo.
-# Everything else in post_echam.r (level/season/mask/area selection, custom
-# per-variable cdo_known_cmds, new time axes, wiso delta variables, ...) is
-# intentionally left out here; add it back in the namelist as a per-job
-# `mode_args`/pre- or post-command if/when actually needed.
-#
-# Usage: a namelist script sets up config (optional, see defaults below) and
-# a `jobs` list, then `source()`s this file. See namelist.post.r for an
-# example. `jobs` is a list of jobs, each a named list of the fields below.
-# Jobs sharing fields are easiest built there with `expand_jobs(common,
-# settings)`: one job per entry of `settings` (pathin, fpattern, experiment,
-# ...), each merged into `common` via `modifyList()`.
-#
-# Each element of `jobs` is a list with:
-#   pathin     - directory to search *recursively* for the input files (any
-#                depth below it, e.g. an ESGF/CMIP6-archive-style
-#                "<pathin>/<table>/<var>/<grid>/<version>/<file>") -- `fpattern`
-#                below is a filename pattern only (no "/"), matched against
-#                every file's basename wherever it is found under `pathin`.
-#                Brace alternatives allowed, e.g. ".../outdata/{echam,jsbach}"
-#   fpattern   - input filename pattern, with one of:
-#                  - a "<year>" placeholder for the year (any number of
-#                    digits -- not assumed to be 4, e.g. a 5-digit
-#                    paleoclimate year works too), e.g.
-#                    "co2_burden_echam_<year>0101.nc" -- 1 file per year
-#                    assumed (this is the same "<year>" convention used
-#                    throughout the rest of this repo, e.g. in the cmor and
-#                    cdotrend scripts); or
-#                  - a "<year>" *and* a "<mon>" placeholder (the latter
-#                    always exactly 2 digits, "01".."12" -- needed to
-#                    disambiguate it from the variable-length "<year>" next
-#                    to it), e.g. "PI-CTRL6_echam6_co2_<year><mon>.grb" -- 1
-#                    file per (year, month) assumed, i.e. 12 files/year; or
-#                  - both a "<from>" and a "<to>" placeholder, e.g.
-#                    "tas_day_MPI-ESM1-2-LR_historical_r1i1p1f1_gn_<from>0101-<to>1231.nc"
-#                    -- for archives (e.g. CMIP6) where 1 file covers a whole
-#                    chunk of years, with that chunk's own actual from/to
-#                    years encoded in the name. The chunk boundaries are not
-#                    assumed known up front: candidate files are found via a
-#                    regex derived from `fpattern` itself (a capture group
-#                    per placeholder), their actual per-file year range is
-#                    parsed back out of the matched filenames, and only the
-#                    file(s) whose range overlaps [from, to] below
-#                    are kept and concatenated -- so a request may span, and
-#                    correctly pull in, more than one chunk file.
-#                Any other "<...>"-style tag left in `fpattern` (e.g. an
-#                unsupported "<mon_from>") is wildcarded away when searching
-#                for candidate files, but is not otherwise interpreted.
-#                `fpattern` may also contain "/" to include the last
-#                directory level(s) of the path, e.g.
-#                "<year>0101-<year>1231/cLand_yearly_remapcon_r360x180.nc" for
-#                output with the year only in the directory name (a 2nd
-#                "<year>" is wildcarded, see below); it is then matched
-#                against that many trailing path components instead of the
-#                basename alone.
-#                A "*" matches any text, as in a shell glob, e.g.
-#                "pCO2s_fesom_*<year>0101.nc" for both
-#                "pCO2s_fesom_mon_20150101.nc" and "pCO2s_fesom_20150101.nc".
-#                Directly before a placeholder it never ends in a digit, so
-#                the year/month digits are not taken up by it.
-#                Either way (except the derive-only ambiguity check the
-#                "<year>"+"<mon>" case skips, see below), more than 1 file
-#                matching the very same year (or year+month, or year range)
-#                anywhere under `pathin` is treated as an error (ambiguous --
-#                which one is the real one?), not silently resolved by
-#                picking one.
-#   from,
-#   to         - [optional] inclusive year range to look for (with "<year>":
-#                one file per year in this range is assumed to exist; with
-#                "<from>"/"<to>": the found chunk file(s) must
-#                fully cover this range, individual chunks need not align
-#                with it). Default (either or both left unset): the
-#                min/max year actually found under `pathin` -- i.e. every
-#                "<year>" file found, or the full span of every
-#                "<from>"/"<to>" chunk file found. Either way,
-#                the same "no gaps" check still applies over the resulting
-#                (given or derived) range. For "<from>"/"<to>",
-#                also applied as a "-select,...,year=<from>/<to>"
-#                filter (see `sel_op()`), trimming the data itself to
-#                exactly this range -- needed there since a whole matching
-#                chunk file may cover *more* years than requested. Not
-#                applied at all for "<year>"/"<year>"+"<mon>" (the found
-#                file(s) there already exactly match the range by
-#                construction, so it would be a no-op -- and, unlike
-#                `level`, *not* a safe one to always include regardless:
-#                confirmed by testing that this combined with `--pedantic`
-#                actually crashes cdo if ARG_MAX chunking ever splits the
-#                job's files such that a given chunk's own file(s) don't
-#                individually contain every requested year).
-#   varnamein  - [optional] variable name to select from the input files;
-#                default: `cdo showname` of the 1st found input file (with
-#                `-t <code> -f nc` too, if `code` is set -- otherwise a raw
-#                code-table file's numeric codes would not resolve to a name
-#                at all)
-#   varnameout - [optional, default = varnamein] variable name in the output
-#                (applied via `cdo -setname`)
-#   mode       - "select" (no reduction, just pick the variable), or any cdo
-#                statistic operator name, e.g. "fldmean", "fldint", "fldsum",
-#                "fldstd", "zonmean", "yearmean", "timmean"
-#   mode_name  - [optional, default = mode] name of the statistic in `fout` and
-#                `pathout` instead of `mode`, e.g. mode="fldsum" with
-#                normalized weights multiplied in `cdo_pre` is a weighted
-#                field mean --> mode_name="fldmean"
-#   mode_args  - [optional] arguments appended to `mode`, e.g. mode="zonmean",
-#                mode_args="zonal_1" --> "-zonmean,zonal_1"
-#   dtin       - [optional] override for `fout`'s "<dtin>" segment (see
-#                `fout` below) -- only needed if `cdo_pre` itself changes
-#                the data's temporal frequency
-#   level      - [optional] a single height/depth level or a comma-separated
-#                list of levels to select, in the units of the input's own
-#                vertical axis, e.g. level="50" or level="0,10,50". Applied
-#                as part of the variable selection itself
-#                (`-select,name=...,level=...`), so this is where cdo does
-#                the actual subsetting -- not a separate operator.
-#   code       - [optional] path to a cdo code table / partab file (`cdo -t
-#                <code>`), needed to resolve numeric GRIB codes to variable
-#                names before `varnamein` can be selected by name at all --
-#                the classic case being raw echam GRIB output, e.g.
-#                ".../historical2_186110.01_co2.codes" (1 per model output
-#                stream/month). Not specific to any one model: leave unset
-#                for input that is already proper (self-describing) netCDF.
-#                Or a pattern like `fpattern`, e.g. "*_<year><mon>.01_co2.codes":
-#                the table of the 1st input file is used for all files.
-#   cdo_pre    - [optional] 1 or more cdo operator(s) (with their own
-#                leading "-", e.g. "-remapycon,r180x90" or
-#                "-setmisstonn -remapycon,r180x90" for several chained
-#                together), applied *before* the `mode` statistic -- but
-#                after selection/`level`, so e.g.
-#                `cdo_pre = "-remapycon,r180x90 -setgrid,/path/to/mesh.nc"`
-#                is the classic "setgrid + remapycon" combination: attach
-#                the correct source grid (needed whenever the input's own
-#                grid is not correctly/fully described in the file itself --
-#                the classic case being an unstructured mesh, e.g. native
-#                FESOM output), then regrid to a regular one before e.g. a
-#                `zonmean` (which needs a regular grid) can be computed on it.
-#   cdo_post   - [optional] 1 or more cdo operator(s) (same "-op,args"
-#                syntax as `cdo_pre`), applied *after* the `mode` statistic
-#                -- chained into the *same* cdo command/call as everything
-#                else above, not a separate `cdo` invocation afterward --
-#                e.g. a unit conversion, or any further reduction/operator
-#                not already covered by `mode`/`mode_args`. If `files` has
-#                to be split into chunks (see `cdo_nchar_max_arglist`
-#                below), `cdo_post` runs once per chunk, *before* the
-#                chunks are concatenated, not once on the final whole
-#                result -- fine for e.g. a further spatial or
-#                unit-conversion operator, but not equivalent to a single
-#                run-once-at-the-end call for an operator that is itself
-#                sensitive to that split (e.g. a further temporal one).
-#   setup,
-#   experiment - used in the default `fout` name/`pathout` dirs below
-#                (CMIP6/CMOR-like); no generic default. `setup` is the whole
-#                model setup, e.g. setup="AWI-ESM-1-REcoM", experiment="ssp126"
-#   model      - [optional, default none] model component within `setup`
-#                whose output is processed, e.g. "fesom", "recom", "echam6",
-#                "jsbach", "lpj_guess"; appended to `setup` in the default
-#                `fout` name as "<setup>_<model>"; unset for output not
-#                belonging to a single component (e.g. cmorized CMIP6 data)
-#   variant    - [optional, default = "r1i1p1f1"] used in the default `fout`
-#                name below
-#   grid       - [optional, default = "gn"] used in the default `fout` name
-#                below (e.g. "gn" native, "gr1" regridded)
-#   pathout    - [optional, default = pathin up to any "{"] output directory. Whatever is
-#                given (or defaulted to `pathin`) has "/<setup>/<mode>/<varnameout>"
-#                appended, unless it already ends in exactly that (so a
-#                `pathout` already constructed that way by the caller is
-#                left alone, not doubled up).
-#   do         - [optional, default = T] if F, the job is skipped (e.g. to
-#                switch off 1 dataset of a group without commenting it out)
-#   fout       - [optional] output filename; default, CMIP6/CMOR-like:
-#                "<pathout>/<varnameout>_<dtin>_<mode>_<depth>_<setup>_<model>_<experiment>_<variant>_<grid>_<from>-<to>.nc"
-#                (<model> omitted, along with its surrounding "_", when unset)
-#                e.g. "CO2f_mon_fldint_AWI-ESM-1-REcoM_recom_esm-ssp585_r1i1p1f1_gn_2015-2100.nc", or
-#                "spco2_mon_fldmean_AWI-ESM-1-REcoM_ssp126_r1i1p1f1_gr1_2015-2100.nc" without `model`.
-#                <depth> is `level` above (any "," replaced by "-"), omitted
-#                entirely (along with its surrounding "_") when `level` is
-#                unset, as for a surface variable. <dtin> is the *input*
-#                data's own temporal frequency, e.g. "day"/"mon"/"year" --
-#                by default inferred from the input files themselves (see
-#                `get_dt_from_file()`), regardless of `mode`, including its fallback
-#                for the case where even 1 whole input file holds only a
-#                single usable time step, where no within-file step can be
-#                diffed at all. Override with `dtin` below if `cdo_pre`
-#                itself changes the data's frequency (e.g. a `-yearmonmean`
-#                in `cdo_pre` turns monthly input into annual data *before*
-#                `mode`'s own statistic ever sees it -- `get_dt_from_file()`
-#                would still report "mon", the input files' own real
-#                frequency, mislabeling the actual (now annual) output).
-#                <mode> is `mode` verbatim (e.g. "select",
-#                "fldmean", "yearmean") -- shown separately from <dtin> since
-#                a temporal-reduction `mode` (e.g. "yearmean") changes the
-#                output's actual resolution without changing <dtin>, which
-#                always describes the input.
-#                If `save_fout_an` (config, default T) and `fout` is a time
-#                series (1 grid point and 1 level per variable) finer than
-#                annual, its `cdo yearmean` (`cdo yearmonmean` for monthly
-#                data, i.e. weighted by days per month) is also saved as `fout_an`: the
-#                same name with <dtin> = "year" ("_an" appended to a given
-#                `fout`).
+# job fields ([o]: optional):
+#   pathin     input dir, searched recursively; brace alternatives allowed, e.g. ".../outdata/{echam,jsbach}"
+#   fpattern   input file pattern with "<year>", "<year>"+"<mon>" or "<from>"+"<to>"; "*" allowed;
+#              may include trailing dir levels, e.g. "<year>0101-<year>1231/cLand_yearly.nc"
+#   from, to   [o] year range; default: range of the found files
+#   varnamein  [o] default: 1st variable of the 1st input file
+#   varnameout [o] default: varnamein
+#   mode       "select" or a cdo statistic, e.g. "fldmean"
+#   mode_name  [o] name of `mode` in fout/pathout, e.g. "fldmean" for mode = "fldsum" with weights; default: mode
+#   mode_args  [o] e.g. mode = "zonmean", mode_args = "zonal_1" --> "-zonmean,zonal_1"
+#   dtin       [o] <dtin> in fout; default: inferred from the input; set if cdo_pre changes the frequency
+#   level      [o] level(s) to select, e.g. "0,10,50"
+#   code       [o] cdo code table (`cdo -t`), or a pattern like fpattern
+#   cdo_pre    [o] cdo operators before `mode`, e.g. "-remapycon,r180x90 -setgrid,mesh.nc"
+#   cdo_post   [o] cdo operators after `mode`, e.g. "-setunit,ppm -mulc,2"; run per chunk if the files are split
+#   setup      model setup, e.g. "AWI-ESM-1-REcoM"
+#   model      [o] model component, e.g. "recom"
+#   experiment e.g. "esm-ssp585"
+#   variant    [o] default: "r1i1p1f1"
+#   grid       [o] default: "gn"
+#   pathout    [o] default: pathin; "/<setup>/<mode_name>/<varnameout>" is appended
+#   fout       [o] default: <varnameout>_<dtin>_<mode_name>[_<depth>]_<setup>[_<model>]_<experiment>_<variant>_<grid>_<from>-<to>.nc
+#   do         [o] F: skip the job; default: T
+# if `save_fout_an`, the annual mean of a sub-annual time series fout is also saved (<dtin> = "year")
 
 message("\n****************** post.r start ******************")
 
-# ---- config (override any of these in the namelist before sourcing) ----
-# `exists("force")` (default `exists()` args) would search the *whole* search
-# path, including base R -- and `force` is itself a base R function
-# (base::force, for lazy-eval forcing), so a plain `exists("force")` is
-# always TRUE regardless of whether the namelist set one, silently leaving
-# `force` bound to that function instead of a boolean. Restrict the search to
-# the global environment (where a namelist's top-level assignments land) for
-# every one of these checks, to avoid that class of bug entirely.
+# ---- config (override in the namelist) ----
+# search only globalenv: `force` is also a base function
 user_set <- function(varname) exists(varname, where=globalenv(), inherits=F)
 
-# same class of bug as `user_set()` above, but for 1 job's fields: both
-# `job$field` and `job[[field]]` (its default `exact=NA`) do *partial*
-# matching on list names, so e.g. `job$pathin` could silently return
-# `job$pathout`'s value whenever `pathin` itself is unset but `pathout` is
-# (confirmed by testing) -- some of this script's own job field names
-# collide exactly this way ("pathin"/"pathout", "mode"/"mode_args").
-# `%in% names(job)` is a plain string equality check with no such fallback,
-# so gate every job field access through this.
-# explicit NULL counts as "not given" (falls through to `default`), not a
-# present-but-NULL value overriding it
+# no partial matching of list names (e.g. pathin/pathout); NULL = not given
 job_get <- function(job, field, default=NULL) if (field %in% names(job) && !is.null(job[[field]])) job[[field]] else default
 if (!user_set("dry")) dry <- F # if T: only print what would be run
 if (!user_set("force")) force <- F # if T: redo even if fout already exists
 if (!user_set("clean")) clean <- T # if T: remove temporary chunk/select files
 if (!user_set("save_fout_an")) save_fout_an <- T # if T: also save the annual mean (`fout_an`) of a sub-annual time series `fout`
 if (!user_set("cdo")) {
-    # `attributes(...)$status` is only set on a *failed* system() call (NULL
-    # on success), so check the result string itself rather than that attribute
     cdo <- suppressWarnings(system("which cdo", intern=T, ignore.stderr=T))
     if (length(cdo) != 1 || !nzchar(cdo)) stop("could not find `cdo` on PATH; set `cdo <- \"/path/to/cdo\"` in the namelist")
 }
 if (!user_set("cdo_nthreads")) cdo_nthreads <- max(1, trunc(0.75*as.integer(system("nproc", intern=T))))
-if (!user_set("jobs")) stop("must provide a `jobs` list before sourcing post.r; see namelist.post.r for an example")
+if (!user_set("jobs")) stop("must provide a `jobs` list before sourcing post.r; see namelist.post_fesom_recom.r for an example")
 
-# every job must be a named list, and every field one post.r knows: a job
-# appended as `c(jobs, list(pathin=...))` instead of `c(jobs, list(list(...)))`
-# spreads its fields as separate "jobs", and job_get() would silently ignore a
-# misspelt field (e.g. "fpatern"), which a shared `common` list passes on to
-# every job built from it
+# every job a named list of known fields
 known_fields <- c("pathin", "fpattern", "from", "to", "varnamein", "varnameout",
                   "mode", "mode_name", "mode_args", "dtin", "level", "code", "cdo_pre", "cdo_post",
                   "setup", "model", "experiment", "variant", "grid", "pathout", "fout", "do")
@@ -278,9 +73,7 @@ cdo_version <- base::numeric_version(cdo_version)
 cdo_can_chain <- cdo_version >= base::numeric_version("1.9.4")
 message("cdo = ", cdo, " (version ", cdo_version, ", ", if (!cdo_can_chain) "cannot" else "can", " chain selection+statistic)")
 
-# ---- max cdo/nco command-line length, to detect "Argument list too long" up front ----
-# `system()` runs a command as `sh -c "<cmd>"`, i.e. the whole command is 1 argument, and linux limits a single
-# argument to MAX_ARG_STRLEN = 32 pages = 131072 bytes (fails with exit status 127), independent of the larger ARG_MAX
+# max command length: system() runs `sh -c "<cmd>"`, 1 argument limited to MAX_ARG_STRLEN = 131072
 cdo_nchar_max_arglist <- trunc(0.9*min(as.integer(system("getconf ARG_MAX", intern=T)), 131072)) # 10% safety margin
 
 ##################################################################################
@@ -300,66 +93,17 @@ run_cmd <- function(cmd, files=NULL) {
     }
 }
 
-# the cdo statistic operator string for a given `mode`, e.g. "fldmean" -->
-# "-fldmean", "zonmean"+"zonal_1" --> "-zonmean,zonal_1", "select" --> "" (no
-# reduction, `-select,name=` alone is enough)
-# the "-select,..." operator string, folding in an optional height/depth
-# `level` filter and a `from`/`to` range (cdo's own
-# "-select,name=...,level=...,year=<from>/<to>" syntax -- `select`'s own
-# "year" key, rather than a separate "-selyear" operator, so this is where
-# cdo does the actual year-trimming too, same as `level`) -- but *only*
-# when `needs_year_filter` (from `find_input_files()`) says it's actually
-# needed, i.e. only for the "<from>"/"<to>" convention, where a
-# whole matching chunk file may cover *more* years than requested (chunk
-# boundaries need not align with the request, see its own docs above) --
-# without this, the untrimmed chunk's full range would silently be used
-# instead of just [from, to]. The "<year>" and "<year>"+"<mon>"
-# conventions never need it (each found file already exactly matches its
-# own single year(-month) by construction) -- and, unlike `level`, it is
-# NOT safe to just always include it as a harmless no-op there: confirmed
-# by testing that "-select,...,year=X/Y" on a file that only contains some
-# (not all) of the requested years, together with the `--pedantic` and
-# `-P <n>` (parallel) options this script always uses, actually *crashes*
-# cdo itself ("terminate called recursively") rather than just warning --
-# hit for real by the "<year>" convention once ARG_MAX chunking splits the
-# job's full year range across separate per-file chunks, each of which by
-# itself then only ever has 1 of the requested years.
-# Shared by `cdo_select_calc()`'s command-length estimate and
-# `cdo_select_calc_1cmd()`'s actual command, so the two can never drift apart
+# cdo statistic operator, e.g. "-zonmean,zonal_1"; "" for "select"
 mode_to_calc <- function(mode, mode_args) {
     if (mode == "select") "" else paste0("-", mode, if (nzchar(mode_args)) paste0(",", mode_args) else "")
 }
+# year filter only for "<from>"/"<to>" chunk files; with "<year>" files it can crash cdo when chunked
 sel_op <- function(varnamein, level, from, to, needs_year_filter) {
     paste0("-select,name=", varnamein, if (nzchar(level)) paste0(",level=", level) else "",
            if (needs_year_filter) paste0(",year=", from, "/", to) else "")
 }
 
-# infer the temporal frequency of the *input* `files` from the data itself
-# (used for the default `fout` name's "<dtin>" segment, always -- regardless
-# of `mode`; `mode` gets its own separate "<mode>" segment there instead,
-# see post.r's header comment). Tiered, most-to-least direct:
-#   1. the actual timestamps of the first file: if it holds >= 2 distinct
-#      time steps, the median step between them gives the frequency
-#      directly.
-#   2. a file with only 1 (or 0 usable) time step cannot be diffed on its
-#      own -- this is the case a single-timestep input needs special
-#      handling for: instead, spread the *total* number of time steps found
-#      (this file's own ntime, times the number of input files, assuming a
-#      uniform count per file) over the *requested* number of years. For
-#      the "<year>" 1-file-per-year convention this is exact (nfiles ==
-#      nyears by construction, so it reduces to exactly that file's own
-#      ntime -- e.g. 1 file/year with 12 monthly steps each --> 12
-#      steps/year, or 1 file/year with 1 (already annual) step each --> 1
-#      step/year); for the "<from>"/"<to>" chunk convention it is
-#      an approximation that only matters when even a single chunk file
-#      holds just 1 time step -- rare, since tier 1 above already handles
-#      the normal, many-steps-per-chunk case directly.
-# Either way, classify the resulting steps/year against known frequencies
-# within a tolerance; anything else (irregular data, or genuinely just 1
-# time step in 1 file for 1 requested year, where nothing at all -- not
-# even this tier-2 ratio -- can distinguish "the 1 value is an annual mean"
-# from "it's some other single snapshot") falls back to a literal
-# "<n>ts_yr-1" label rather than silently guessing wrong.
+# temporal frequency of the input: median time step of the 1st file, else ntime*nfiles/nyears
 get_dt_from_file <- function(files, from, to) {
     steps_per_year <- NA_real_
 
@@ -401,9 +145,7 @@ is_subannual_timeseries <- function(f) {
         length(ntime) == 1 && !is.na(ntime) && ntime > length(years)
 } # is_subannual_timeseries
 
-# escape all regex metacharacters in `x` (1 literal character at a time via
-# `fixed=T`, rather than 1 combined character-class pattern -- easy to get
-# subtly wrong across `[`/`]`/`-`/`^` position rules within a class)
+# escape regex metacharacters
 regex_escape <- function(x) {
     for (s in c("\\", ".", "^", "$", "|", "(", ")", "[", "]", "{", "}", "*", "+", "?")) x <- gsub(s, paste0("\\", s), x, fixed=T)
     x
@@ -451,29 +193,7 @@ codes_resolve <- function(codes, files, jobi) {
     chosen
 } # codes_resolve
 
-# find the input files for 1 job: either the "<year>" convention (1 file per
-# year, substituted directly), or the "<from>"+"<to>" convention (a
-# file covers a -- possibly multi-year -- chunk, with that chunk's own actual
-# from/to years encoded in the name, e.g. CMIP6-archive-style
-# "..._<from>0101-<to>1231.nc"). Chunk boundaries are not assumed
-# known up front for the latter: parse each candidate's actual year range
-# back out via a regex derived from `fpattern` itself, then keep only the
-# file(s) that overlap [from, to] and error out if they do not
-# fully cover it.
-# Searches `pathin` *recursively*, in 1 `list.files()` listing (rather than a
-# filesystem lookup per year/chunk) -- `pathin` may be an archive root several
-# directories above where the files actually live (e.g. ESGF/CMIP6-style
-# "<pathin>/<table>/<var>/<grid>/<version>/<file>"), so a plain, non-recursive
-# lookup would miss them entirely. That listing is itself restricted, via
-# `list.files()`'s own `pattern` argument, to a regex derived from
-# `fpattern` (matched against each file's basename only, even though the
-# listing is recursive) -- so only files that could possibly match
-# `fpattern` are ever listed, not every file anywhere under `pathin`. More
-# than 1 match for the same year (or year range) anywhere under `pathin` is
-# an error (ambiguous), never silently resolved by picking one.
-# print the first/last `n` of a (possibly long) file list, so a sanity
-# check doesn't require scrolling through hundreds/thousands of names;
-# printed in full instead if there's no gap to collapse (<= 2n files)
+# print the first/last `n` file names
 print_head_tail <- function(files, n=13) {
     nf <- length(files)
     if (nf <= 2*n) {
@@ -485,6 +205,7 @@ print_head_tail <- function(files, n=13) {
     }
 } # print_head_tail
 
+# input files of 1 job; error if ambiguous or incomplete
 find_input_files <- function(pathin, fpattern, from, to, jobi) {
     # with "/" in `fpattern`, match it against the last `nparts` path components
     nparts <- length(strsplit(fpattern, "/", fixed=T)[[1]])
@@ -500,22 +221,9 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
              "\"<mon>\" is only supported combined with \"<year>\"")
     }
 
-    # the regex derived from `fpattern` is built up front and passed
-    # straight to `list.files()` as its own `pattern` (matched against
-    # basename even with recursive=T, confirmed by testing) -- so only
-    # files that could possibly match `fpattern` are ever listed in the
-    # first place, not every file anywhere under `pathin`. "<year>" (and
-    # "<from>"/"<to>") become "[0-9]+" -- 1 or more digits, not
-    # assumed to be 4 -- while "<mon>" is fixed at exactly 2 ("[0-9]{2}"):
-    # needed to disambiguate it from a variable-length "<year>" immediately
-    # next to it (e.g. "<year><mon>" with no separator at all) -- with an
-    # unanchored "[0-9]+" on *both* sides there would be no unique split.
+# regex from fpattern: <year>, <from>, <to> --> [0-9]+; <mon> --> [0-9]{2}
     if (is_year && has_mon) {
-        # sub()'s literal-text replacement leaves the 2 capture groups in
-        # the same left-to-right order the 2 placeholders were in
-        # `fpattern` to begin with, regardless of which is substituted
-        # first -- so track that original order here to know which capture
-        # group (2 or 3) is the year vs the month later on
+# capture group order of year and month
         year_before_mon <- regexpr("<year>", fpattern, fixed=T) < regexpr("<mon>", fpattern, fixed=T)
         year_group <- if (year_before_mon) 2 else 3
         mon_group <- if (year_before_mon) 3 else 2
@@ -529,20 +237,10 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
         re <- sub("<from>", "([0-9]+)", re, fixed=T)
         re <- sub("<to>", "([0-9]+)", re, fixed=T)
     }
-    # any other "<...>" tag left in `fpattern` (this script only recognizes
-    # "<year>"/"<mon>"/"<from>"/"<to>", but a namelist might carry
-    # over an unrelated tag from this repo's other, richer placeholder
-    # conventions, e.g. "<mon_from>") is not a literal string to match --
-    # wildcard it out too (as ".*", the regex equivalent of a "*" glob
-    # wildcard; a literal "*" would instead be read as "zero or more of the
-    # previous character") rather than requiring the literal "<...>" text
-    # to appear in a filename
+# other <...> tags: wildcard
     re <- gsub("<[^<>]*>", ".*", re)
 
-    # glob "*" (escaped to "\*" above): directly before a placeholder's
-    # "([0-9]" it must not end in a digit, or a greedy ".*" takes the year's
-    # leading digits; as a non-capturing group, so the placeholders' capture
-    # group numbers stay the same (needs perl=T for every use of `re` below)
+# "*" before a placeholder must not end in a digit; non-capturing, so perl=T below
     re <- gsub("\\\\\\*(?=\\(\\[0-9\\])", "(?:.*[^0-9])?", re, perl=T)
     re <- gsub("\\*", ".*", re, fixed=T)
 
@@ -555,10 +253,7 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
     if (length(missing_dirs) > 0) message("--> `pathin` director", if (length(missing_dirs) == 1) "y" else "ies",
                                           " not found --> skip:\n", paste(missing_dirs, collapse="\n"))
     pathins <- pathins[dir.exists(pathins)]
-    # recursive listing via `find` instead of `list.files(recursive=T)`: the latter stats every entry to check if it
-    # is a directory, which takes minutes on lustre for e.g. an echam outdata dir of 350k files; `find` gets the type
-    # from the directory listing itself (0.1 s instead of 2 min). Like `list.files()`, `find` does not follow
-    # symlinked directories here and `pattern` is matched against the basename
+# `find` instead of list.files(recursive=T), which is very slow on lustre
     message("--> run `find pathins -mindepth 1 ! -type d` and keep basenames matching \"", re_tre, "\" in `pathin` director",
             if (length(pathins) == 1) "y" else "ies", " (specify a clearer `pathin` if this takes too long). pathins:\n",
             paste(pathins, collapse="\n"))
@@ -587,12 +282,7 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
 
     if (is_year && has_mon) {
         if (!from_given || !to_given) {
-            # neither/either given --> derive from every "<year>"+"<mon>"
-            # file actually found, rather than a caller-specified range.
-            # Same (year, month) matched by >1 file is ambiguous -- unlike
-            # the plain "<year>" case below, the same *year* alone
-            # legitimately recurs (once per month), so only the (year,
-            # month) pair, not the year alone, is checked here
+# derive from/to from the found files; same year+month twice: ambiguous
             mm <- regmatches(all_basenames, regexec(re, all_basenames, perl=T))
             file_years <- as.integer(vapply(mm, `[`, character(1), year_group))
             file_mons <- as.integer(vapply(mm, `[`, character(1), mon_group))
@@ -611,8 +301,7 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
         combos <- expand.grid(mon=1:12, year=years)
         files <- rep(NA_character_, nrow(combos))
         missing <- character(0)
-        # match by the year/month read from each name, not the exact name,
-        # which a "*" in `fpattern` would not give
+# match by the year/month parsed from the names
         mm <- regmatches(all_basenames, regexec(re, all_basenames, perl=T))
         all_years <- as.integer(vapply(mm, `[`, character(1), year_group))
         all_mons <- as.integer(vapply(mm, `[`, character(1), mon_group))
@@ -642,8 +331,7 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
 
     if (is_year) {
         if (!from_given || !to_given) {
-            # neither/either given --> derive from every "<year>" file
-            # actually found, rather than a caller-specified range
+# derive from/to from the found files
             file_years <- as.integer(vapply(regmatches(all_basenames, regexec(re, all_basenames, perl=T)), `[`, character(1), 2))
             dup <- file_years %in% file_years[duplicated(file_years)]
             if (any(dup)) {
@@ -686,8 +374,7 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
         file_from <- as.integer(vapply(m, `[`, character(1), 2))
         file_to <- as.integer(vapply(m, `[`, character(1), 3))
 
-        # same (from, to) chunk matched by >1 file (e.g. duplicated across
-        # subdirectories/versions) is ambiguous -- do not silently pick one
+# same chunk twice: ambiguous
         key <- paste(file_from, file_to)
         dup <- key %in% key[duplicated(key)]
         if (any(dup)) {
@@ -696,10 +383,7 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
         }
 
         if (!from_given || !to_given) {
-            # missing bound(s) derived from every chunk file found, spanning
-            # its own full min/max range; a bound that *is* given still
-            # restricts which chunks are kept (below), same as when both
-            # are given
+# derive missing bound(s) from the found chunks
             if (!from_given) from <- min(file_from)
             if (!to_given) to <- max(file_to)
             message("--> `from`/`to` not (both) given --> derived from found \"<from>\"/\"<to>\" files: ", from, "-", to)
@@ -729,42 +413,12 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
     }
 } # find_input_files
 
-# cdo's `-P <n>` etc. up front, plus `-t <codes> -f nc` if a code table is
-# given. Unlike `-setgrid`/`-select`/`-fldmean` etc., `-t` is NOT a chainable
-# operator (`cdo -select,... -t <codes> ...` errors with "Operator >t<
-# not found!") -- it is a *global option* and must precede the whole
-# operator chain, right after `cdo` itself. `-f nc` is bundled alongside it
-# because raw model output using a code table (e.g. echam's own binary
-# "service"/GRIB-like format) otherwise stays in its native format even when
-# written to a ".nc"-named file (cdo does not infer output format from the
-# file extension) -- without it, `varnamein` would not even carry a resolved
-# name in the result, defeating the point of `-t` in the first place.
+# global options; `-t` must precede the operators, `-f nc` to write code-table input as netcdf
 cdo_prefix <- function(codes) {
     paste0(cdo, " --pedantic -P ", cdo_nthreads, if (nzchar(codes)) paste0(" -t ", codes, " -f nc") else "")
 }
 
-# 1 cdo call: select `varnamein` (renamed to `varnameout`, optionally
-# restricted to `level`) from `files`, apply the `mode` statistic (unless
-# mode=="select"), write to `fout_i`. Chains selection+statistic into 1
-# command if the cdo version allows it (see `cdo_can_chain` above);
-# otherwise selects to a temp file first, then runs the statistic on that
-# temp file as a 2nd command (`code`/`-f nc` only apply to that 1st,
-# file-reading command -- the 2nd, on the by-then-proper-netCDF temp file,
-# needs neither).
-# `cdo_pre` (may be "" for none): 1 or more cdo operator(s) (with their own
-# leading "-", e.g. "-remapycon,r180x90 -setgrid,/path/to/mesh.nc"), applied
-# after selection but before the `mode` statistic -- e.g. the classic
-# "setgrid + remapycon" combination, regridding an unstructured mesh to a
-# regular grid before e.g. computing a `zonmean` on it (which needs one).
-# `cdo_post` (may be "" for none): 1 or more cdo operator(s), applied right
-# after the `mode` statistic -- chained into this *same* cdo command/call
-# (not a separate `cdo` invocation afterward). Note this means it runs
-# once per chunk when `cdo_select_calc()` below has to split `files` up
-# (i.e. *before* the chunks are `cdo cat`-ed together), not once on the
-# final whole result -- fine for e.g. a further spatial or unit-conversion
-# operator, but not equivalent to a single run-once-at-the-end call for an
-# operator that is itself sensitive to that split (e.g. a further temporal
-# one).
+# 1 cdo call: select, cdo_pre, mode, cdo_post, setname; 2 calls for cdo < 1.9.4
 cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_i) {
     calc <- mode_to_calc(mode, mode_args)
     sel <- sel_op(varnamein, level, from, to, needs_year_filter)
@@ -775,7 +429,7 @@ cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, 
         cmd <- gsub("[[:space:]]+", " ", cmd) # tidy up in case any piece was ""
         run_cmd(cmd, files)
     } else if (mode == "select" && !nzchar(cdo_post)) {
-        # nothing beyond the rename needed -- select+rename straight into `fout_i`, no 2nd cdo call
+        # 1 call suffices
         run_cmd(gsub("[[:space:]]+", " ", paste0(cdo_prefix(codes), " -setname,", varnameout, " ", cdo_pre, " ", sel, " ", filestr, " ", fout_i)), files)
     } else {
         tmpfile <- paste0(tools::file_path_sans_ext(fout_i), "_tmp_select_", Sys.getpid(), ".nc")
@@ -785,11 +439,7 @@ cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, 
     }
 } # cdo_select_calc_1cmd
 
-# same as `cdo_select_calc_1cmd()`, but splits `files` into as many chunks
-# as needed to keep every individual cdo command under `cdo_nchar_max_arglist`
-# characters, running 1 chunk at a time and `cdo cat`-ing the chunk results
-# back together into 1 final `fout` (chunk count 1 is the common case: just
-# runs directly, no cat needed).
+# as cdo_select_calc_1cmd(), split into chunks if the command is too long, then `cdo cat`
 cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout) {
     nchar_fixed <- nchar(paste0(cdo_prefix(codes), " ", cdo_post, " -setname,", varnameout, " ", mode_to_calc(mode, mode_args), " ", cdo_pre,
                                 " ", sel_op(varnamein, level, from, to, needs_year_filter), " ", fout))
@@ -801,8 +451,6 @@ cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level
         return(invisible())
     }
 
-    # doesn't fit --> split into chunks of as many files as fit under the
-    # limit each, so no individual cdo invocation ever hits "Argument list too long"
     nfiles_per_chunk <- max(1, floor((cdo_nchar_max_arglist - nchar_fixed) / max(nchar_per_file)))
     chunk_starts <- seq(1, length(files), by=nfiles_per_chunk)
     nchunks <- length(chunk_starts)
@@ -840,7 +488,7 @@ for (jobi in seq_along(jobs)) {
         next
     }
 
-    # check required fields ("varnamein"/"from"/"to" are not among them -- see below)
+# required fields
     required <- c("pathin", "fpattern", "mode", "setup", "experiment")
     missing <- required[!sapply(required, function(f) !is.null(job_get(job, f)))]
     if (length(missing) > 0) stop("job ", jobi, " is missing required field(s): ", paste(missing, collapse=", "))
@@ -855,14 +503,7 @@ for (jobi in seq_along(jobs)) {
     variant <- job_get(job, "variant", "r1i1p1f1")
     grid <- job_get(job, "grid", "gn")
 
-    # input files are needed up front now regardless of `job$fout`: both for
-    # the default (CMOR-like) `fout`'s "dtin" segment (see `get_dt_from_file()` below)
-    # and, here, for defaulting `varnamein` itself off the 1st one found.
-    # Always (re-)discovered here, every iteration, rather than only when
-    # needed: a stale `files` left over from a *previous* job in this loop
-    # would otherwise silently carry over and be reused for the wrong job.
-    # `from`/`to` come back resolved too (unchanged if `job` gave
-    # both; derived from the found files' own min/max otherwise).
+# input files, rediscovered for every job
     message("run `find_input_files()` ...")
     found <- find_input_files(job_get(job, "pathin"), job_get(job, "fpattern"), job_get(job, "from"), job_get(job, "to"), jobi)
     if (is.null(found)) { # no input files
@@ -885,11 +526,7 @@ for (jobi in seq_along(jobs)) {
     }
     varnameout <- job_get(job, "varnameout", varnamein)
 
-    # `pathout` (given, or defaulted to `pathin`) always ends in
-    # "/<setup>/<mode>/<varnameout>" -- appended unless it's already exactly
-    # that (compared component-by-component on the *trailing* path parts,
-    # not a plain string suffix match, so e.g. a `pathout` that merely ends
-    # in "...xspco2" is not mistaken for already ending in ".../spco2")
+# append "/<setup>/<mode_name>/<varnameout>" unless already there
     pathout <- job_get(job, "pathout", pathin_base(job_get(job, "pathin")))
     pathout_parts <- strsplit(sub("/+$", "", pathout), "/")[[1]]
     required_tail <- c(job_get(job, "setup"), mode_name, varnameout)
@@ -898,12 +535,7 @@ for (jobi in seq_along(jobs)) {
     }
     if (!dir.exists(pathout)) {
         message("`pathout` = \"", pathout, "\" does not exist --> create")
-        # `dir.create()` does NOT stop/error on failure (e.g. no permission
-        # on a parent dir) -- it just emits a warning and returns FALSE,
-        # which is easy to miss among this script's other `message()`
-        # output, silently leaving `pathout` never actually created and
-        # every write into it failing later (or, if `dry`, "succeeding"
-        # without ever writing anything at all) -- verify explicitly instead
+# dir.create() only warns on failure
         if (!dry && !dir.create(pathout, recursive=T) && !dir.exists(pathout)) {
             stop("job ", jobi, ": failed to create `pathout` = \"", pathout, "\" (see the warning above for the reason, ",
                  "e.g. a permission problem on one of its parent directories)")

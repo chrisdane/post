@@ -1,13 +1,12 @@
 # r
 
 # Plots of the REcoM carbon time series made by namelist.post_recom_carbon.r.
-# Run with: `Rscript namelist.plot_recom_carbon.r`
 
-force <- T # default: F; set T to redo even if fout already exists
+force <- T # redo existing fout
 
 hostname <- Sys.info()["nodename"]
 if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
-    pathpost <- c("/work/ab1095/a270073/post", "/work/ba1103/a270073/post") # searched in this order; new derived files go to the 1st
+    pathpost <- c("/work/ab1095/a270073/post", "/work/ba1103/a270073/post") # search order; derived files go to the 1st
     pathplot <- "/work/ab1095/a270073/plots"
 } else if (grepl("albedo|^prod-[0-9]+$", hostname)) { # albedo; login nodes: albedo1/2; compute nodes: prod-123
     pathpost <- "/albedo/work/user/cdanek/post"
@@ -37,7 +36,7 @@ for (v in c("calcdiss", "calcif", "CO2f", "docexd", "docexn", "GPPd", "GPPn", "N
 
 #####################################################################################################
 
-# post file `f` relative to `pathpost`: its 1st existing copy, else where it is made (under the 1st `pathpost`)
+# post file `f`: 1st existing in `pathpost`, else in the 1st `pathpost`
 ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
 setup <- "AWI-ESM-3-REcoM"
 fin <- function(v, exp) paste0(setup, "/fldsum/", v, "/", v, "_year_fldsum_", setup, "_recom_", exp$experiment, "_r1i1p1f1_gn_", exp$from, "-", exp$to, ".nc")

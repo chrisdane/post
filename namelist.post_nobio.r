@@ -13,10 +13,9 @@
 # rename_post_nobio.sh; co2_burden is converted to ppm
 #   - recom bgc02 [mmolC m-3]: DIC volume-weighted mean of every level (annual), from levelwise_bgc02_nobio.sh
 # not covered: DICremin
-# run with: `Rscript namelist.post_nobio.r`
 
 #dry <- T # default: F; set T to only print the cdo commands without running them
-#force <- T # default: F; set T to redo even if the output file already exists
+#force <- T # redo existing fout
 
 pathout <- "/work/ab1095/a270073/post"
 setup <- "AWI-ESM-1-REcoM"

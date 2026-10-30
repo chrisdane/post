@@ -1,84 +1,13 @@
 # r
 
-# Merge post.r output files that are "the same thing" (same variable, dtin,
-# mode, depth, setup, model, experiment, variant, grid -- i.e. identical filename
-# except for the trailing "<from>-<to>" chunk), covering different,
-# non-overlapping time chunks, into 1 file spanning their combined range.
-# Needed e.g. after an experiment's `outdata` got split across several
-# `pathin` roots (a model version bump, a restart under a new run name, ...)
-# and post.r was run once per root, leaving 1 output file per root per
-# variable instead of 1 continuous file.
+# merge post.r output files that differ only in "_<from>-<to>.nc" (e.g. after a run continued under another
+# `pathin`) into 1 file with `cdo mergetime`; only if the time axes have no gap and no overlap
+# `experiment_aliases`: [optional] list of sets of experiment names to treat as the same, e.g.
+#   list(c("AWI-ESM3-CC-LR-CMIP7-Spinup", "AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230")); fout uses the 1st name
+# `expout`: [optional; required for > 1 set] experiment name in fout instead
 #
-# Uses `cdo mergetime`, not `cdo cat`: `cat` concatenates files in the exact
-# order given on the command line, so a file-discovery bug that hands it
-# files out of order silently produces a wrongly-ordered time axis. Confirmed
-# by testing: `cdo cat` and `cdo mergetime` on the discovered files is
-# equivalent here (no overlaps, nothing to interleave) but with the 2 chunks
-# given in reverse, `cat` just concatenates reverse order, while `mergetime`
-# sorts by the actual time axis regardless -- cheap insurance for free.
-#
-# Matching/grouping: a file's "base" is its full name with the trailing
-# "_<from>-<to>.nc" stripped off (both integers). Files under the same
-# directory with an identical `base` are 1 group to merge; `from`/`to`
-# themselves are *not* required to match anything -- that's the whole point.
-# Note this means a chunk whose `experiment` segment itself differs (e.g.
-# deliberately renamed to "..._v351_from2230" to tell 2 `pathin` roots apart
-# in a namelist) will NOT be grouped with the others by default -- grouping
-# is purely string-equality on `base`, nothing here understands that 2
-# different `experiment` strings might really be 1 continued run, unless
-# told so via `experiment_aliases` (see below).
-#
-# `experiment_aliases`: [optional] a list of character vectors, each 1 set
-# of `experiment` name(s) to treat as equivalent for grouping, e.g.
-# `list(c("AWI-ESM3-CC-LR-CMIP7-Spinup", "AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230"))`
-# -- a file's `base` has every name in a set *after* the 1st literally
-# replaced by the set's 1st name (longest name replaced first, so a name
-# that is itself a literal prefix of another, as above, cannot partially
-# match inside it) before grouping, so otherwise-identical chunks whose
-# `experiment` segment differs only by one of these configured aliases are
-# grouped (and merged) together, with the resolved `fout` using the set's
-# 1st name throughout -- unless overridden by `expout` (below).
-#
-# `expout`: [optional unless more than 1 `experiment_aliases` set is given,
-# see below] a replacement `experiment` name for `fout`, used *instead of*
-# each `experiment_aliases` set's own 1st name -- e.g. with `exp=A,B
-# expout=C`, a group matched via that set gets `fout` carrying "C", not "A".
-# Requires `experiment_aliases` to be set (nothing to anchor the substitution
-# on otherwise); either 1 value (applied to every set) or exactly 1 value per
-# `experiment_aliases` set (paired in order). With more than 1
-# `experiment_aliases` set (i.e. `exp=` given more than once), `expout` is
-# *required* -- each set would otherwise independently fall back to its own
-# 1st member's name, and with several sets in play at once that default is
-# easy to lose track of, so it must be spelled out explicitly.
-#
-# A group is only ever merged if its chunks have no gap and no overlap,
-# checked against the *actual* `time` dim values read from each file (not
-# the filename's "<from>-<to>" years, which are only used for grouping and
-# initial ordering/labeling) -- a chunk file's name could in principle cover
-# a year range without actually containing every time step in it. Per group:
-# every file's `time` dim is read (via ncdf4) and converted to a real time
-# axis (`maybe_time_axis()`, copied from plot.r); the typical step is the
-# median of all *within-file* gaps, pooled across the whole group (robust
-# against a short file with too few steps to tell on its own); each
-# *between-file* boundary gap is then compared against that: too small
-# (<= half the typical step, including negative/overlapping) or too large
-# (>= 1.5x the typical step) --> skip the whole group, do not merge. If any
-# file's time dim can't be read/converted (e.g. no recognized time dim, or
-# unparseable units), this falls back to the old, weaker check based purely
-# on the filename's "<from>-<to>" years (overlap --> skip, gap --> merge
-# anyway with a warning), with a message explaining why.
-#
-# Usage: `Rscript merge_chunks.r dir=<dir1>[,<dir2>,...] [exp=<exp1>,<exp2>[,...]] [expout=<name>] [ignore_modes=<mode1>,...] [force=F] [dry=F] [clean=F] [cdo=/path/to/cdo]`
-# -- every argument is "key=value", comma-separated lists where noted; each
-# `<dir>` is searched *recursively* for chunk files. `exp=` sets 1
-# `experiment_aliases` set (see above); give `exp=` more than once for more
-# than 1 set. E.g., plain:
-#   `Rscript merge_chunks.r dir=/path/to/dir`
-# merging across differently-named `experiment`s too (e.g. after a model
-# version bump mid-run), with the merged output renamed to a 3rd name:
-#   `Rscript merge_chunks.r dir=/path/to/dir exp=AWI-ESM3-CC-LR-CMIP7-Spinup,AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230 expout=AWI-ESM3-CC-LR-CMIP7`
-# Any config var can also still be set the usual way before sourcing
-# (pre-set variables win over same-named "key=value" args), e.g.:
+# usage: `Rscript merge_chunks.r dir=<dir1>[,<dir2>,...] [exp=<exp1>,<exp2>[,...]] [expout=<name>] [ignore_modes=<mode1>,...] [force=F] [dry=F] [clean=F] [cdo=/path/to/cdo]`
+#   each `exp=` is 1 `experiment_aliases` set; variables set before sourcing win over arguments, e.g.
 #   `Rscript -e 'ignore_modes <- c("select"); source("merge_chunks.r")' dir=/path/to/dir`
 
 library(ncdf4)
@@ -86,8 +15,7 @@ library(ncdf4)
 # ---- time axis helpers (copied from plot.r for consistency) ----
 known_time_dimnames <- c("time", "Time", "TIME", "mon")
 
-# raw dim values + their "units" attribute --> POSIXct, if recognized
-# ("<unit> since <origin>", or cdo's "day as %Y%m%d"); else unchanged
+# time dim values + units --> POSIXct if recognized; else unchanged
 maybe_time_axis <- function(dimname, vals, units) {
     if (is.na(match(dimname, known_time_dimnames)) || !nzchar(units)) return(vals)
     if (grepl("^\\s*day as %Y%m%d", units)) {
@@ -125,9 +53,7 @@ read_time_bounds <- function(f) {
 
 user_set <- function(varname) exists(varname, where=globalenv(), inherits=F)
 
-# ---- parse "key=value" CLI args (comma-separated lists where noted); a key
-# given more than once collects every occurrence (used by `exp=` for more
-# than 1 `experiment_aliases` set) ----
+# ---- "key=value" arguments; a repeated key collects all values ----
 cli_args <- commandArgs(trailingOnly=T)
 cli <- list()
 if (length(cli_args) > 0) {
@@ -137,7 +63,7 @@ if (length(cli_args) > 0) {
     }
     cli <- split(sub("^[^=]*=", "", cli_args), sub("=.*$", "", cli_args)) # named list, 1 character vector per distinct key
 }
-cli_get <- function(key) cli[[key, exact=T]] # plain `cli[[key]]`/`cli$key` do *partial* (prefix) matching on list names, e.g. `cli$exp` would wrongly match an existing "expout" entry if there's no exact "exp" -- confirmed by testing
+cli_get <- function(key) cli[[key, exact=T]] # exact: `cli$exp` would partially match "expout"
 cli_csv <- function(key) if (!is.null(cli_get(key))) unlist(strsplit(cli_get(key), ",", fixed=T)) else NULL
 cli_logical <- function(key) {
     v <- cli_get(key)
@@ -151,13 +77,13 @@ cli_logical <- function(key) {
 # ---- config (override any of these before sourcing, or via `key=value` CLI args above) ----
 if (!user_set("dry")) dry <- if (!is.null(cli_logical("dry"))) cli_logical("dry") else F # if T: only print what would be run
 if (!user_set("force")) force <- if (!is.null(cli_logical("force"))) cli_logical("force") else F # if T: redo even if the merged output file already exists
-if (!user_set("clean")) clean <- if (!is.null(cli_logical("clean"))) cli_logical("clean") else F # if T: remove the individual chunk files after a verified-successful merge
+if (!user_set("clean")) clean <- if (!is.null(cli_logical("clean"))) cli_logical("clean") else F # if T: remove the chunk files after a successful merge
 if (!user_set("cdo")) cdo <- if (!is.null(cli_get("cdo"))) cli_get("cdo")[length(cli_get("cdo"))] else suppressWarnings(system("which cdo", intern=T, ignore.stderr=T))
-if (!user_set("ignore_modes")) ignore_modes <- if (!is.null(cli_csv("ignore_modes"))) cli_csv("ignore_modes") else character(0) # e.g. c("select") -- files whose `mode` filename segment matches 1 of these (as a whole "_<mode>_"/"_<mode>.nc" token) are skipped entirely, as if they didn't exist
-if (!user_set("experiment_aliases")) { # e.g. list(c("exp1", "exp1_continued")) -- see header comment; `exp=` CLI arg, 1 set per occurrence
+if (!user_set("ignore_modes")) ignore_modes <- if (!is.null(cli_csv("ignore_modes"))) cli_csv("ignore_modes") else character(0) # skip files with these modes, e.g. c("select")
+if (!user_set("experiment_aliases")) { # see header
     experiment_aliases <- if (!is.null(cli_get("exp"))) lapply(cli_get("exp"), function(x) strsplit(x, ",", fixed=T)[[1]]) else list()
 }
-if (!user_set("expout")) expout <- if (!is.null(cli_get("expout"))) cli_get("expout") else character(0) # [optional unless >1 `experiment_aliases` set] see header comment; `expout=` CLI arg, 1 value or 1 per `experiment_aliases` set
+if (!user_set("expout")) expout <- if (!is.null(cli_get("expout"))) cli_get("expout") else character(0) # see header
 if (length(experiment_aliases) > 1 && length(expout) == 0) {
     stop("`experiment_aliases` has ", length(experiment_aliases), " sets (", length(experiment_aliases), " `exp=` occurrences) but no `expout` was given -- ",
          "with more than 1 set, each would otherwise independently fall back to its own 1st member's name (see header comment); give `expout=` ",
@@ -211,9 +137,7 @@ from <- as.integer(vapply(m, `[`, character(1), 3))
 to <- as.integer(vapply(m, `[`, character(1), 4))
 dirs_of <- dirname(files)
 
-# group key: `base`, with every `experiment_aliases` set collapsed to its
-# own 1st name (longest member first, so no name can partially match inside
-# a longer one that contains it, e.g. as a prefix)
+# group key: `base` with every alias set collapsed to its 1st name (longest first)
 group_key <- base
 for (seti in seq_along(experiment_aliases)) {
     set <- experiment_aliases[[seti]]
@@ -264,16 +188,13 @@ for (groupi in seq_along(groups)) {
             message("--> gap(s) in coverage (e.g. between ", gto[which(gap)[1]], " and ", gfrom[which(gap)[1] + 1], ") -- merging anyway")
         }
     } else {
-        # order by actual first time step, not the filename -- then re-derive
-        # gfrom/gto/gfiles to match, so `fout`'s name and everything below
-        # stays consistent with however the real data turned out to be sorted
+        # order by the first time step
         tord <- order(vapply(tb, `[[`, double(1), "first"))
         gfiles <- gfiles[tord]; gfrom <- gfrom[tord]; gto <- gto[tord]; tb <- tb[tord]
 
         typical_dt <- stats::median(unlist(lapply(tb, `[[`, "diffs")))
         if (is.na(typical_dt)) {
-            # every file has just 1 time step -- estimate the typical step from
-            # the gaps between consecutive files' single timestamps instead
+            # 1 time step per file: typical step from the gaps between files
             firsts <- vapply(tb, `[[`, double(1), "first")
             typical_dt <- stats::median(diff(firsts))
         }

@@ -1,24 +1,18 @@
 # r
 
-# Example namelist for post.r: set up config (optional; post.r has sensible
-# defaults for everything below), activate whichever jobs are wanted via
-# `if (T)`/`if (F)`, then source post.r.
-# Run with: `Rscript namelist.post.r`
+# namelist for post.r: activate blocks with `if (T)`; run with `Rscript namelist.post.r`
 
-# ---- config (all optional; shown here just to document the defaults) ----
-#cdo <- "/sw/spack-levante/cdo-2.6.0-akkxhz/bin/cdo" # default: `which cdo`
-#cdo_nthreads <- 32 # default: 75% of `nproc`
-#dry <- T # default: F; set T to only print the cdo commands without running them
-#force <- T # default: F; set T to redo even if the output file already exists
-#clean <- F # default: T; set F to keep temporary chunk/select files for debugging
-#save_fout_an <- F # default: T; set F to not also save the annual mean of a sub-annual time series `fout`
+# config (optional; defaults in post.r)
+#cdo <- "/sw/spack-levante/cdo-2.6.0-akkxhz/bin/cdo"
+#cdo_nthreads <- 32
+#dry <- T # only print the cdo commands
+#force <- T # redo existing fout
+#clean <- F # keep temporary files
+#save_fout_an <- F # no annual mean of sub-annual time series
 
-jobs <- list() # jobs collected below, from every active `if (T)` block
+jobs <- list()
 
-# One job per entry of `settings`: each dataset's fields override/extend
-# `common` (a field set to NULL in a dataset removes it from that job).
-# A single job is just `list(list(...))` as `settings`, or `common` alone
-# with `settings = list(list())`. `do = F` in a job skips it (default T).
+# 1 job per entry of `settings`, merged into `common`; NULL removes a field
 expand_jobs <- function(common, settings) lapply(settings, function(d) utils::modifyList(common, d))
 
 #####################################################################################################
@@ -78,48 +72,6 @@ if (F) { # awiesm1 raw fesom/recom
     ))
 }
 
-if (T) { # awiesm1 raw echam/jsbach
-    jobs <- c(jobs, expand_jobs(
-        common=list(
-            setup   = "AWI-ESM-1-REcoM",
-            model   = "echam6", varnamein="co2_burden", fpattern="*_<year><mon>.01_co2", code="*_<year><mon>.01_co2.codes", mode="fldmean", # the model is "echam6", never "echam"
-            #model   = "jsbach",
-            pathout = "/work/ab1095/a270073/post"
-        ),
-        settings=list(
-            list(
-                experiment = "ssp126",
-                pathin     = "/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/ssp126/outdata/{echam,jsbach}"
-            )
-            ,list(
-                experiment = "ssp534-over2",
-                pathin     = "/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/ssp534-over2/outdata/{echam,jsbach}"
-            )
-            ,list(
-                experiment = "ssp585",
-                pathin     = "/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/ssp585/outdata/{echam,jsbach}"
-                ,from  = 2015
-                ,to    = 2039
-            )
-            ,list(
-                experiment = "esm-ssp126",
-                pathin     = "/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-ssp126/outdata/{echam,jsbach}"
-            )
-            ,list(
-                experiment = "esm-ssp534-over2",
-                pathin     = "/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-ssp534os2/outdata/{echam,jsbach}"
-            )
-            ,list(
-                experiment = "esm-ssp585",
-                pathin     = "/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-ssp585/outdata/{echam,jsbach}"
-                ,from  = 2015
-                ,to    = 2039
-            )
-        )
-    ))
-}
-
-
 if (F) { # awiesm1 cmorized
     jobs <- c(jobs, expand_jobs(
         common=list(
@@ -151,8 +103,8 @@ if (F) { # awiesm1 cmorized
     ))
 }
 
+
 if (length(jobs) == 0) stop("no job activated; flip at least one `if (T)`/`if (F)` above to `if (T)`")
 
 message("run `source(\"~/scripts/r/post/post.r\")` ...")
 source("~/scripts/r/post/post.r")
-

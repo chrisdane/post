@@ -9,19 +9,7 @@
 # usage: set `plots` (and optional config below) in a namelist and source this file
 #
 # each element of `plots` is a list with:
-#   fout    - output file(s), ".png" and/or ".pdf". May contain "<plot_from>"/
-#             "<plot_to>" placeholders, substituted with this plot's own
-#             `plot_from`/`plot_to` (below) if set, else the actual calendar-year
-#             range found in its data (so the name reflects whatever time range
-#             was actually plotted even if `plot_from`/`plot_to` were never
-#             set at all). Only substituted if present; `fout` is left as is
-#             otherwise. A job whose `fout` uses either placeholder has its
-#             data read before `fout` can be resolved (needed to derive the
-#             fallback range), so it loses the usual before-reading
-#             `force`/already-exists skip -- only the plotting itself is
-#             skipped in that case, not the (cheap, if `plot_from`/`plot_to`
-#             restrict it) read. Errors only if a placeholder is present and
-#             no range -- explicit or data-derived -- could be found at all.
+#   fout    - output file(s), ".png" and/or ".pdf"; "<plot_from>"/"<plot_to>" are replaced by the plotted years
 #   pathout - [optional] output dir, default: dirname(fout)
 #   mode    - [optional] "auto" (default) or "pairwise"
 #   datas   - list of 1 or more datasets to plot together, each a list with:
@@ -32,44 +20,17 @@
 #     fac      - [optional] factor the data is multiplied with, e.g. -1 to flip the sign; default: 1
 #     plot_from, plot_to - [optional] overrides the plot-level `plot_from`/`plot_to` (see below) for just this dataset
 #     col, lty, lwd - [optional] line plots only
-#     ma       - [optional] line plots only; list(nyrs=, align=) overriding,
-#                for just this dataset, the plot-level `ma_opts` (see below),
-#                itself overriding config `ma_nyrs`/"center", used for the
-#                `plot_ma` running-mean output; align: "center" (default,
-#                centered window) or "right" (trailing window, filling the
-#                start via an expanding window instead of leaving it
-#                unplotted, like `zoo::rollapply(align="right", partial=T)`)
+#     ma       - [optional] line plots only; list(nyrs=, align="center"|"right") running mean, overrides `ma_opts`
 #   plot_from,
-#   plot_to - [optional] inclusive calendar-year range to actually plot, e.g.
-#             plot_from=1900, plot_to=2000 -- restricts a dataset's time dim
-#             to just this range, read directly via `ncvar_get(..., start=,
-#             count=)` rather than reading every time step and subsetting in
-#             R afterward (matters for big files). May be set per plot (here,
-#             applies to every dataset in `datas`), per dataset (its own
-#             `plot_from`/`plot_to`, overriding the plot-level one for just
-#             that dataset), and/or globally for every plot in this whole run
-#             (config `plot_from`/`plot_to` below, overridden by a plot's/
-#             dataset's own). Ignored (with a message) for a dataset
-#             whose variable has no single recognized time dim, or whose
-#             time dim's units could not be parsed into an actual time axis.
+#   plot_to - [optional] calendar-year range to plot; per plot, per dataset or global config
 #   width, height, res - [optional] png px and ppi (pdf: width/res, height/res inch); default: plot_sizes()
 #   ylab    - [optional] line plots only; default: label and units of the 1st dataset
 #   legend_pos - [optional] line plots only; "my_maxempty" (default; "topleft" if it fails),
 #             a `legend()` keyword or c(x, y)
 #   legend_ncol, legend_cex - [optional] default: 2 and 0.8 if more than 5 datasets, else 1 and 1
 #   legend_x_intersp - [optional] space between line and text in character widths; default: 0.5
-#   plot_ma - [optional] if T, also save a running-mean version of this plot
-#             next to the normal one (same `fout`(s), with "_ma<nyrs>" inserted
-#             before the extension, <nyrs> = the plot's/config's `ma_opts`/
-#             `ma_nyrs` -- a dataset's own differing `ma$nyrs` isn't reflected
-#             in the name) -- analogous to post.r's `save_fout_an` saving an
-#             additional annual-mean `fout_an` next to `fout`. Only applies to
-#             a non-pairwise line plot with an actual time axis (ignored
-#             otherwise, same as any dataset's `ma`, above). default: config
-#             `plot_ma` (below), itself default F
-#   ma_opts - [optional] list(nyrs=, align=) default running-mean settings for
-#             every dataset in `datas` that doesn't set its own `ma` (above);
-#             itself overrides config `ma_nyrs`/"center"
+#   plot_ma - [optional] also save a running-mean version ("_ma<nyrs>" before the extension); default: config `plot_ma`
+#   ma_opts - [optional] list(nyrs=, align=) for datasets without own `ma`; overrides config `ma_nyrs`
 #   zlim, nlevels, n, m - [optional] contour plots only; passed to image.plot.pre()/image.plot.nxm()
 
 message("\n****************** plot.r start ******************")
@@ -85,11 +46,7 @@ source("~/scripts/r/functions/image.plot.nxm.r")
 # config; may be set in the namelist
 user_set <- function(varname) exists(varname, where=globalenv(), inherits=F)
 
-# not `job$x`: partial matching would return e.g. job$mode for job$m
-# explicit NULL counts as "not given" (falls through to `default`) --
-# otherwise `list(plot_from=exp$plot_from, ...)` with an absent `exp$plot_from`
-# would store a present-but-NULL "plot_from" key, winning over `default` when
-# it shouldn't
+# not `job$x`: partial matching would return e.g. job$mode for job$m; NULL = not given
 job_get <- function(job, field, default=NULL) if (field %in% names(job) && !is.null(job[[field]])) job[[field]] else default
 if (!user_set("dry")) dry <- F # if T: do not plot
 if (!user_set("force")) force <- F # if T: redo even if fout already exists
@@ -109,10 +66,10 @@ if (!user_set("family")) family <- "Graphik Regular Trial" # fallback: png "Droi
 if (!user_set("mgp")) mgp <- c(1.35, 0.5, 0) # lines of axis title (contour plots only), tick labels, axis (default: c(3, 1, 0))
 if (!user_set("tcl")) tcl <- -0.3 # tick length (default: -0.5)
 if (!user_set("pathpost")) pathpost <- "" # where to search a `fin` given as bare file name
-if (!user_set("plot_from")) plot_from <- NULL # [optional] restrict ALL plots to just this calendar-year range by default (reads only the needed time steps); overridden by a plot's/dataset's own `plot_from`/`plot_to`
+if (!user_set("plot_from")) plot_from <- NULL # calendar-year range of all plots; overridden per plot/dataset
 if (!user_set("plot_to")) plot_to <- NULL
-if (!user_set("plot_ma")) plot_ma <- F # if T (or a plot's own `plot_ma`): also save a running-mean version of each eligible (time series) plot; see header
-if (!user_set("ma_nyrs")) ma_nyrs <- 21 # [default] running-mean window length in years; overridable per-dataset via that dataset's own `ma$nyrs`
+if (!user_set("plot_ma")) plot_ma <- F # if T: also save running-mean versions; see header
+if (!user_set("ma_nyrs")) ma_nyrs <- 21 # running-mean window in years
 
 ##################################################################################
 
@@ -140,7 +97,7 @@ resolve_fin <- function(fin, ploti, datai) {
     if (file.exists(fin)) return(fin)
     dirs <- brace_expand(pathpost)
     dirs <- dirs[nzchar(dirs) & dir.exists(dirs)]
-    # fast: `fin` relative to `pathpost`, e.g. "echam/fldmean/co2_burden/<file>"
+    # fast: `fin` relative to `pathpost`
     hits <- file.path(dirs, fin)
     hits <- hits[file.exists(hits)]
     if (length(hits) == 1) return(hits)
@@ -154,9 +111,7 @@ resolve_fin <- function(fin, ploti, datai) {
     hits
 } # resolve_fin
 
-# read 1 dataset; `plot_from`/`plot_to` (may be NULL): this plot's default
-# calendar-year range to restrict the time dim to, overridden by `d`'s own
-# `plot_from`/`plot_to` if it has them
+# read 1 dataset; `plot_from`/`plot_to` (may be NULL) overridden by those of `d`
 read_data <- function(d, ploti, datai, plot_from=NULL, plot_to=NULL) {
     fin <- resolve_fin(job_get(d, "fin"), ploti, datai)
     nc <- ncdf4::nc_open(fin)
@@ -175,9 +130,7 @@ read_data <- function(d, ploti, datai, plot_from=NULL, plot_to=NULL) {
     vardims <- sapply(nc$var[[varname]]$dim, function(dd) dd$name)
     time_dim_ind <- which(!is.na(match(vardims, known_time_dimnames)))
 
-    # `plot_from`/`plot_to`: restrict reading to just the needed time steps via
-    # `ncvar_get(..., start=, count=)`, instead of reading the whole file and
-    # subsetting in R afterward -- matters for big files
+    # read only the needed time steps
     plot_from_d <- job_get(d, "plot_from", plot_from)
     plot_to_d <- job_get(d, "plot_to", plot_to)
     if (!is.null(plot_from_d) && !is.null(plot_to_d) && plot_from_d > plot_to_d) {
@@ -235,9 +188,7 @@ read_data <- function(d, ploti, datai, plot_from=NULL, plot_to=NULL) {
     dimunits <- vapply(vardims, function(nm) if (is.null(nc$dim[[nm]]$units)) "" else nc$dim[[nm]]$units, character(1))
     ncdf4::nc_close(nc)
 
-    # this dataset's own actual (post-restriction, if any) time range, as plain
-    # calendar years -- used as the "<plot_from>"/"<plot_to>" fallback in
-    # `resolve_fout()` for a plot with no `plot_from`/`plot_to` of its own
+    # time range in calendar years, for "<plot_from>"/"<plot_to>"
     year_from <- year_to <- NA_integer_
     if (length(time_dim_ind) == 1) {
         tv <- maybe_time_axis(vardims[time_dim_ind], dimvals[[time_dim_ind]], dimunits[time_dim_ind])
@@ -295,18 +246,11 @@ maybe_time_axis <- function(dimname, vals, units) {
     origin + vals*mult
 } # maybe_time_axis
 
-# `year_from`/`year_to` (may be NULL): fallback for the "<plot_from>"/"<plot_to>"
-# placeholders below, used only if this plot has no `plot_from`/`plot_to` of its
-# own -- the main loop passes in the data's own actual (post-read) time range
-# for this, once known, for a job whose `fout` needs it
+# `year_from`/`year_to` (may be NULL): data time range, fallback for "<plot_from>"/"<plot_to>"
 resolve_fout <- function(job, ploti, year_from=NULL, year_to=NULL) {
     fout <- job_get(job, "fout")
     if (is.null(fout)) stop("plot ", ploti, " has no `fout`")
     if (!is.character(fout) || length(fout) == 0) stop("plot ", ploti, ": `fout` must be a non-empty character vector")
-    # "<plot_from>"/"<plot_to>" placeholders (optional): substituted with this
-    # plot's own `plot_from`/`plot_to` if set, else `year_from`/`year_to` (the
-    # data's actual time range), so the output filename reflects whatever time
-    # range was actually plotted
     plot_from <- job_get(job, "plot_from", year_from)
     plot_to <- job_get(job, "plot_to", year_to)
     if (grepl("<plot_from>", fout, fixed=T)) {
@@ -328,10 +272,7 @@ resolve_fout <- function(job, ploti, year_from=NULL, year_to=NULL) {
     ifelse(abs, fout, paste0(pathout, "/", basename(fout)))
 } # resolve_fout
 
-# validate `fouts`' extensions, create their output dir(s) if needed, and (if
-# `force` is F) drop any that already exist -- shared by both the up-front
-# (no "<plot_from>"/"<plot_to>") and the deferred (needs the data first) path
-# in the main loop below
+# check `fouts` extensions, create dirs, drop existing ones unless `force`
 check_fouts <- function(fouts, ploti) {
     exts <- tolower(tools::file_ext(fouts))
     if (!all(exts %in% c("png", "pdf"))) stop("plot ", ploti, ": every `fout` must end in \".png\" or \".pdf\"; got ", paste0("\"", fouts, "\"", collapse=", "))
@@ -373,12 +314,7 @@ for (ploti in seq_along(plots)) {
     if (is.null(job_datas) || length(job_datas) == 0) stop("plot ", ploti, " has no `datas`")
     fout_raw <- job_get(job, "fout")
     if (is.null(fout_raw)) stop("plot ", ploti, " has no `fout`")
-    # "<plot_from>"/"<plot_to>" in `fout` (see `resolve_fout()`) may need the
-    # actual data's own time range as a fallback when this plot has no
-    # `plot_from`/`plot_to` of its own -- that isn't known until the data is
-    # read, so `fout` can only be resolved (and thus only then checked against
-    # `force`) after reading in that case, unlike the normal up-front check
-    # that lets a job be skipped before ever reading its data
+    # fout with "<plot_from>"/"<plot_to>" and no plot_from/plot_to: resolved after reading the data
     needs_defer <- any(grepl("<plot_from>", fout_raw, fixed=T)) || any(grepl("<plot_to>", fout_raw, fixed=T))
 
     if (!needs_defer) {
@@ -485,11 +421,7 @@ for (ploti in seq_along(plots)) {
                 xvals_list <- lapply(datas, function(dm) maybe_time_axis(dm$dims[1], dm$dimvals[[1]], dm$dimunits[1]))
                 is_time <- inherits(xvals_list[[1]], "POSIXct")
 
-                # draws 1 version of this line-vs-time(/dim) plot into the
-                # currently open device, using whatever `$data` is in
-                # `datas_draw` -- shared between the normal (raw `datas`) and,
-                # if `plot_ma`, the running-mean (`datas_ma`, below) render,
-                # which otherwise differ only in that 1 field
+                # draw 1 version of the plot (raw or running mean)
                 draw_ts <- function(datas_draw) {
                     yr <- range(sapply(datas_draw, function(x) range(x$data, finite=T, na.rm=T)))
                     xr <- range(if (is_time) do.call(c, xvals_list) else unlist(xvals_list), finite=T)
@@ -543,13 +475,11 @@ for (ploti in seq_along(plots)) {
                 message("run `my_dev.off(", fout, ") ...")
                 my_dev.off(fout)
 
-                # `plot_ma`: also save a running-mean version of this same
-                # plot, analogous to post.r's `save_fout_an` -- only makes
-                # sense for an actual time axis, not an arbitrary dim
+                # `plot_ma`: running-mean version; only for a time axis
                 job_plot_ma <- job_get(job, "plot_ma", plot_ma)
                 if (job_plot_ma && is_time) {
                     job_ma_opts <- job_get(job, "ma_opts", list()) # plot-level default, cascades to any dataset without its own `ma`
-                    job_ma_nyrs <- job_get(job_ma_opts, "nyrs", ma_nyrs) # nominal window (years) for `fout_ma`'s name -- a dataset's own `ma$nyrs` (if any) can still differ, this is just the label
+                    job_ma_nyrs <- job_get(job_ma_opts, "nyrs", ma_nyrs) # window in `fout_ma`'s name
                     fout_ma <- sub("(\\.[^./]+)$", paste0("_ma", job_ma_nyrs, "\\1"), fout)
                     if (fout_ma == fout) stop("plot ", ploti, ": could not derive a \"_ma\" `fout` from \"", fout, "\"")
                     if (file.exists(fout_ma) && !force) {
@@ -560,7 +490,7 @@ for (ploti in seq_along(plots)) {
                             dm <- datas[[datai]]
                             ma_cfg <- job_get(job_datas[[datai]], "ma", list())
                             ma_opts <- list(nyrs=job_get(ma_cfg, "nyrs", job_ma_nyrs),
-                                       method="data.table::frollmean", # fastest of the options considered; handles NA; fills start/end only for align="right" (`adaptive=T`, below)
+                                       method="data.table::frollmean", # handles NA
                                        align=job_get(ma_cfg, "align", job_get(job_ma_opts, "align", "center")))
                             yvals <- as.vector(dm$data)
                             dt_secs <- stats::median(diff(as.numeric(xvals_list[[datai]])))
@@ -568,7 +498,7 @@ for (ploti in seq_along(plots)) {
                             if (is.na(n) || n < 2) {
                                 message("--> data ", datai, ": could not derive a running-mean window (dt = ", dt_secs, " s) --> leave unsmoothed")
                             } else if (ma_opts$align == "right") {
-                                # fills the start via an expanding window instead of leaving it unplotted, like `zoo::rollapply(align="right", partial=T)`
+                                # expanding window at the start
                                 dm$data <- data.table::frollmean(yvals, n=pmin(seq_along(yvals), n), align="right", na.rm=T, adaptive=T)
                             } else {
                                 dm$data <- data.table::frollmean(yvals, n=n, align=ma_opts$align, na.rm=T)

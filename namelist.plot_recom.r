@@ -1,21 +1,17 @@
 # r
 
-# Example namelist for plot.r: set up config (optional; plot.r has sensible
-# defaults for everything below), activate whichever plots are wanted via
-# `if (T)`/`if (F)`, then source plot.r.
-# Run with: `Rscript namelist.plot.r`
+# namelist for plot.r: activate blocks with `if (T)`; run with `Rscript namelist.plot.r`
 
-# ---- config (all optional; shown here just to document the defaults) ----
-#dry <- T # default: F; set T to only check/report what would be plotted
-#force <- T # default: F; set T to redo even if fout already exists
-#res <- 300 # default: 200; passed to png()/pdf()
-#default_cols <- c("black", "red", "blue") # default line colors, cycled/indexed by dataset
+# config (optional; defaults in plot.r)
+#dry <- T # only check what would be plotted
+#res <- 300
+#default_cols <- c("black", "red", "blue")
 
-force <- T # default: F; set T to redo even if fout already exists
+force <- T # redo existing fout
 
 hostname <- Sys.info()["nodename"]
 if (grepl("levante|^l[0-9]{5}", hostname)) { # levante; compute nodes: l12345
-    pathpost <- c("/work/ab1095/a270073/post", "/work/ba1103/a270073/post") # searched in this order; new derived files go to the 1st
+    pathpost <- c("/work/ab1095/a270073/post", "/work/ba1103/a270073/post") # search order; derived files go to the 1st
     pathplot <- "/work/ab1095/a270073/plots"
 } else if (grepl("albedo|^prod-[0-9]+$", hostname)) { # albedo; login nodes: albedo1/2; compute nodes: prod-123
     pathpost <- "/albedo/work/user/cdanek/post"

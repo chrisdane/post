@@ -1,7 +1,7 @@
 # r
 
-#cdo <- "/sw/spack-levante/cdo-2.6.0-akkxhz/bin/cdo" # default: `which cdo`
-#force <- T # default: F; set T to redo even if the output file already exists
+#cdo <- "/sw/spack-levante/cdo-2.6.0-akkxhz/bin/cdo"
+#force <- T # redo existing fout
 
 mmolC_to_PgC <- "-mulc,1.2011e-17" # mmol C --> PgC (12.011 g mol-1)
 mmolC_d1_to_PgC_yr <- "-mulc,1.2011e-17 -muldpy" # mmol C d-1 --> PgC yr-1 (calendar days per year)
