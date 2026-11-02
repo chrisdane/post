@@ -27,9 +27,9 @@ plots <- list()
 if (T) {
     plots[[length(plots)+1]] <- list(
         datas=list(
-            list(fin=paste0(setup, "/fldsum/CO2f/CO2f_year_fldsum_", setup, "_recom_AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230_r1i1p1f1_gn_1850-2339.nc"), ylab="flux [PgC/yr] (>0: into ocean)")
+            list(fin=paste0(setup, "/fldint/CO2f/CO2f_year_fldint_", setup, "_recom_AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230_r1i1p1f1_gn_1850-2339.nc"), ylab="flux [PgC/yr] (>0: into ocean)")
         ),
-        fout=paste0(pathplot, "/", setup, "/fldsum/CO2f/CO2f_year_fldsum_", setup, "_recom_AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230_1850-2339.png")
+        fout=paste0(pathplot, "/", setup, "/fldint/CO2f/CO2f_year_fldint_", setup, "_recom_AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230_1850-2339.png")
     )
 }
 

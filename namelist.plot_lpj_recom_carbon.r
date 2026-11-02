@@ -31,7 +31,7 @@ experiments <- list(
 ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
 setup <- "AWI-ESM-3-REcoM"
 fin_lpj <- function(v, exp) paste0(setup, "/fldint/", v, "/", v, "_year_fldint_", setup, "_lpj_guess_", exp$experiment, "_r1i1p1f1_r360x180_", exp$from, "-", exp$to, ".nc")
-fin_recom <- function(v, exp) paste0(setup, "/fldsum/", v, "/", v, "_year_fldsum_", setup, "_recom_", exp$experiment, "_r1i1p1f1_gn_", exp$from, "-", exp$to, ".nc")
+fin_recom <- function(v, exp) paste0(setup, "/fldint/", v, "/", v, "_year_fldint_", setup, "_recom_", exp$experiment, "_r1i1p1f1_gn_", exp$from, "-", exp$to, ".nc")
 fin_both <- function(v, exp) paste0(setup, "/fldint/", v, "/", v, "_year_fldint_", setup, "_lpj_guess_recom_", exp$experiment, "_", exp$from, "-", exp$to, ".nc")
 
 comp_cols <- c("black", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "grey50", "red")

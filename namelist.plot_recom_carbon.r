@@ -39,10 +39,10 @@ for (v in c("calcdiss", "calcif", "CO2f", "docexd", "docexn", "GPPd", "GPPn", "N
 # post file `f`: 1st existing in `pathpost`, else in the 1st `pathpost`
 ppost <- function(f) unname(sapply(f, function(x) { hits <- file.path(pathpost, x); hits <- hits[file.exists(hits)]; if (length(hits) > 0) hits[1] else file.path(pathpost[1], x) }))
 setup <- "AWI-ESM-3-REcoM"
-fin <- function(v, exp) paste0(setup, "/fldsum/", v, "/", v, "_year_fldsum_", setup, "_recom_", exp$experiment, "_r1i1p1f1_gn_", exp$from, "-", exp$to, ".nc")
+fin <- function(v, exp) paste0(setup, "/fldint/", v, "/", v, "_year_fldint_", setup, "_recom_", exp$experiment, "_r1i1p1f1_gn_", exp$from, "-", exp$to, ".nc")
 exps_str <- paste(sapply(experiments, "[[", "experiment"), collapse="_vs_")
-fout <- function(name, exp) paste0(pathplot, "/", setup, "/fldsum/cbudget/", name, "_fldsum_", setup, "_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
-#fout <- function(name, exp) paste0(pathplot, "/", setup, "/fldsum/cbudget/", name, "_fldsum_", setup, "_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
+fout <- function(name, exp) paste0(pathplot, "/", setup, "/fldint/cbudget/", name, "_fldint_", setup, "_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
+#fout <- function(name, exp) paste0(pathplot, "/", setup, "/fldint/cbudget/", name, "_fldint_", setup, "_recom_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
 
 # sums and budget terms without own recom output, made here with cdo
 mk <- function(vout, cmd, exp) {
@@ -81,7 +81,7 @@ if (T) { # per variable: experiments overlaid
         plots[[length(plots)+1]] <- list(
             datas=lapply(experiments, function(exp) list(fin=fin(x$v, exp), fac=if (is.null(x$fac)) 1 else x$fac, label=exp$experiment, col=exp$col)),
             ylab=paste0(if (identical(x$fac, -1)) "-", x$v, " [", x$unit, "]", if (isTRUE(x$signed)) " (>0: into ocean)"),
-            fout=paste0(pathplot, "/", setup, "/fldsum/", x$v, "/", x$v, "_year_fldsum_", setup, "_recom_", exps_str, "_<plot_from>-<plot_to>.png")
+            fout=paste0(pathplot, "/", setup, "/fldint/", x$v, "/", x$v, "_year_fldint_", setup, "_recom_", exps_str, "_<plot_from>-<plot_to>.png")
         )
     }
 }

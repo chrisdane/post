@@ -73,7 +73,7 @@ if (F) { # levante
 } else if (T) { # albedo
     experiments <- list(
         #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.0-cc/AWI-ESM3-CC-LR-CMIP7-Spinup/outdata/lpj_guess") # , from=2060)
-        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/lpj_guess", from=2390) # from: 2230; 2230-2389 already post-processed
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/lpj_guess", from=2445, to=2559) # from: 2230; 2230-2444 already post-processed
     )
     lpj_remap_fpattern <- "remapcon_r360x180"
     flandarea <- "/albedo/work/user/cdanek/mesh/lpj/TCO95/landarea_remapcon_r360x180_destarea.nc"
