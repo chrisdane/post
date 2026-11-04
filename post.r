@@ -28,6 +28,8 @@
 #   fout       [o] default: <varnameout>_<dtin>_<mode_name>[_<depth>]_<setup>[_<model>]_<experiment>_<variant>_<grid>_<from>-<to>.nc
 #   do         [o] F: skip the job; default: T
 # if `save_fout_an`, the annual mean of a sub-annual time series fout is also saved (<dtin> = "year")
+# `mc_cores` > 1 runs the jobs in parallel (parallel::mclapply); each job's console output is captured and
+# printed, in job order, only after that job finishes -- avoids interleaved/garbled output across workers
 
 message("\n****************** post.r start ******************")
 
@@ -41,6 +43,7 @@ if (!user_set("dry")) dry <- F # if T: only print what would be run
 if (!user_set("force")) force <- F # if T: redo even if fout already exists
 if (!user_set("clean")) clean <- T # if T: remove temporary chunk/select files
 if (!user_set("save_fout_an")) save_fout_an <- T # if T: also save the annual mean (`fout_an`) of a sub-annual time series `fout`
+if (!user_set("mc_cores")) mc_cores <- 1 # if >1: run jobs in parallel via parallel::mclapply() (jobs are independent of each other); Linux only (fork-based)
 if (!user_set("cdo")) {
     cdo <- suppressWarnings(system("which cdo", intern=T, ignore.stderr=T))
     if (length(cdo) != 1 || !nzchar(cdo)) stop("could not find `cdo` on PATH; set `cdo <- \"/path/to/cdo\"` in the namelist")
@@ -473,10 +476,9 @@ cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level
 
 ##################################################################################
 
-message("\nrun ", length(jobs), " job", if (length(jobs) != 1) "s", " ...")
-skipped <- c() # jobs without input files
-not_done <- c() # jobs with `do` = F
-for (jobi in seq_along(jobs)) {
+message("\nrun ", length(jobs), " job", if (length(jobs) != 1) "s", if (mc_cores > 1) paste0(" (", mc_cores, " in parallel)") else "", " ...")
+
+run_job <- function(jobi) {
 
     job <- jobs[[jobi]]
     message("\n************************************************************")
@@ -484,8 +486,7 @@ for (jobi in seq_along(jobs)) {
             " (mode = \"", job_get(job, "mode"), "\") from \"", job_get(job, "pathin"), "\" ...")
     if (!job_get(job, "do", T)) {
         message("--> `do` = F --> skip")
-        not_done <- c(not_done, jobi)
-        next
+        return(list(jobi=jobi, status="not_done"))
     }
 
 # required fields
@@ -507,8 +508,7 @@ for (jobi in seq_along(jobs)) {
     message("run `find_input_files()` ...")
     found <- find_input_files(job_get(job, "pathin"), job_get(job, "fpattern"), job_get(job, "from"), job_get(job, "to"), jobi)
     if (is.null(found)) { # no input files
-        skipped <- c(skipped, jobi)
-        next
+        return(list(jobi=jobi, status="skipped"))
     }
     files <- found$files
     from <- found$from
@@ -587,7 +587,30 @@ for (jobi in seq_along(jobs)) {
         }
     }
 
-} # for jobi
+    list(jobi=jobi, status="done")
+} # run_job
+
+run_job_captured <- function(jobi) {
+    mclapply_buf <- character() # avoids textConnection()'s "appending to a non-existent char vector" warning
+    con <- textConnection("mclapply_buf", open="wr", local=TRUE)
+    sink(con, type="message")
+    res <- tryCatch(run_job(jobi),
+                     error=function(e) list(jobi=jobi, status="error", error=conditionMessage(e)),
+                     finally={ sink(type="message"); close(con) })
+    res$out <- mclapply_buf
+    res
+}
+
+results <- if (mc_cores > 1) {
+    parallel::mclapply(seq_along(jobs), run_job_captured, mc.cores=mc_cores, mc.preschedule=F) # preschedule=F: job durations vary a lot (e.g. 2d vs 3d+vertint)
+} else {
+    lapply(seq_along(jobs), run_job_captured)
+}
+for (res in results) cat(paste(res$out, collapse="\n"), "\n", sep="") # print each job's captured output, in job order, not interleaved
+errored <- Filter(function(r) identical(r$status, "error"), results)
+if (length(errored) > 0) stop("job ", errored[[1]]$jobi, " failed: ", errored[[1]]$error)
+not_done <- sapply(Filter(function(r) identical(r$status, "not_done"), results), "[[", "jobi")
+skipped <- sapply(Filter(function(r) identical(r$status, "skipped"), results), "[[", "jobi")
 
 if (length(not_done) > 0) {
     message("\n", length(not_done), "/", length(jobs), " job(s) skipped because of `do` = F: ", paste(not_done, collapse=", "))

@@ -2,6 +2,8 @@
 
 #cdo <- "/sw/spack-levante/cdo-2.6.0-akkxhz/bin/cdo"
 #force <- T # redo existing fout
+mc_cores <- 8 # run jobs in parallel (shared login node -- stay moderate)
+cdo_nthreads <- 2
 
 kgC_to_PgC <- "-mulc,1e-12" # kg C (yr-1) --> PgC (yr-1)
 kgCH4_s1_to_PgC_yr <- paste0("-mulc,", 86400*1e-12*12.011/16.043, " -muldpy") # kg CH4 s-1 --> PgC yr-1 (calendar days per year)
@@ -73,7 +75,7 @@ if (F) { # levante
 } else if (T) { # albedo
     experiments <- list(
         #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.0-cc/AWI-ESM3-CC-LR-CMIP7-Spinup/outdata/lpj_guess") # , from=2060)
-        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/lpj_guess", from=2445, to=2559) # from: 2230; 2230-2444 already post-processed
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/lpj_guess", from=2600, to=2609) # from: 2230; 2230-2599 already post-processed
     )
     lpj_remap_fpattern <- "remapcon_r360x180"
     flandarea <- "/albedo/work/user/cdanek/mesh/lpj/TCO95/landarea_remapcon_r360x180_destarea.nc"

@@ -129,6 +129,7 @@ read_data <- function(d, ploti, datai, plot_from=NULL, plot_to=NULL) {
     }
     vardims <- sapply(nc$var[[varname]]$dim, function(dd) dd$name)
     time_dim_ind <- which(!is.na(match(vardims, known_time_dimnames)))
+    time_dim_name <- if (length(time_dim_ind) == 1) vardims[time_dim_ind] else NA_character_
 
     # read only the needed time steps
     plot_from_d <- job_get(d, "plot_from", plot_from)
@@ -218,7 +219,11 @@ read_data <- function(d, ploti, datai, plot_from=NULL, plot_to=NULL) {
     label <- job_get(d, "label", varname)
     message("--> data ", datai, ": \"", label, "\" (\"", varname, "\" from \"", fin, "\") --> ", length(vardims), " remaining dim(s): ",
             if (length(vardims) == 0) "(none, scalar)" else paste(vardims, collapse=", "))
-    list(data=arr, dims=vardims, dimvals=dimvals[vardims], dimunits=dimunits[vardims], varname=varname, units=units, label=label,
+    dimvals_out <- dimvals[vardims]
+    # `timep`: the time dim's values as POSIXct, alongside its raw values under its own name (`dims`/`dimunits`
+    # stay as the actual netcdf dims, so this does not affect anything that counts/uses those, e.g. `length(x$dims)`)
+    if (!is.na(time_dim_name) && time_dim_name %in% vardims && inherits(tv, "POSIXct")) dimvals_out$timep <- tv
+    list(data=arr, dims=vardims, dimvals=dimvals_out, dimunits=dimunits[vardims], varname=varname, units=units, label=label,
          year_from=year_from, year_to=year_to)
 } # read_data
 

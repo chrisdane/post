@@ -22,7 +22,7 @@ experiments <- list(
     #list(experiment="pi_noxios", from=1850, to=1858, col="black")
     #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2229, col="gray")
     #,list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", from=2230, to=2389, col="black") # from: 2230
-    list(experiment="AE3CC_pi", from=1850, to=2444, col="black")
+    list(experiment="AE3CC_pi", from=1850, to=2609, col="black")
 )
 
 # output variable of namelist.post_lpj_carbon.r and its <dtin> in the post.r file name
@@ -55,11 +55,12 @@ exps_str <- paste(sapply(experiments, "[[", "experiment"), collapse="_vs_")
 
 plots <- list()
 
-if (T) { # per variable: experiments overlaid
+if (F) { # per variable: experiments overlaid
     for (x in vars) {
         plots[[length(plots)+1]] <- list(
             datas=lapply(experiments, function(exp) list(fin=fin(x$v, x$dt, exp), label=exp$experiment, col=exp$col)),
             ylab=paste0(x$v, " [", x$unit, "]"),
+            plot_ma=T,
             fout=paste0(pathplot, "/", setup, "/fldint/", x$v, "/", x$v, "_", x$dt, "_fldint_", setup, "_lpj_guess_", exps_str, "_<plot_from>-<plot_to>.png")
         )
     }
@@ -74,6 +75,7 @@ if (T) { # per experiment: the fluxes out of the land in the carbon budget (all 
                 list(fin=fin("wetlandCH4_monthly", "year", exp), label="wetlandCH4_monthly (as C)", col="blue")
             ),
             ylab="flux [PgC/yr] (>0: into atm)",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cflux_budget_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cflux_budget_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
@@ -90,6 +92,7 @@ if (T) { # per experiment: main fluxes (PgC/yr)
                 list(fin=fin("cflux_Fire", "year", exp), label="fire", col="red")
             ),
             ylab="flux [PgC/yr]",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cflux_main_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cflux_main_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
@@ -105,6 +108,7 @@ if (T) { # per experiment: all carbon flux components (cflux columns; sum = NEE;
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(paste0("cflux_", comps[i]), "year", exp), label=comps_labs[i], col=comp_cols[i], lwd=if (comps[i] == "NEE") 2 else 1)),
             ylab="flux [PgC/yr] (>0: into atm)",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cflux_components_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cflux_components_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
@@ -119,6 +123,7 @@ if (T) { # per experiment: all carbon pool components (sum = cLand_monthly)
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[[i]][1], comps[[i]][2], exp), label=comps[[i]][1], col=comp_cols[i])),
             ylab="pool [PgC]",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cpool_components_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cpool_components_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
@@ -131,6 +136,7 @@ if (F) { # per experiment: main land carbon pools (sum = cLand_monthly)
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=if (comps[i] == "cLand_monthly") "black" else comp_cols[i+1], lwd=if (comps[i] == "cLand_monthly") 2 else 1)),
             ylab="pool [PgC]",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cland_pools_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cland_pools_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
@@ -143,6 +149,7 @@ if (F) { # per experiment: cVeg per organ (sum = cVeg_monthly, incl. the npp not
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=comp_cols[i], lwd=if (comps[i] == "cVeg_monthly") 2 else 1)),
             ylab="cVeg [PgC]",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cveg_organs_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cveg_organs_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
@@ -162,6 +169,7 @@ if (T) { # per experiment: cVeg per plant type and their sum (excl. the not yet 
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=comp_cols[i], lwd=if (i == 4) 2 else 1)),
             ylab="cVeg [PgC]",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cveg_types_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cveg_types_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
@@ -176,6 +184,7 @@ if (T) { # per experiment: cLitter per pool (surf + subsurf = cLitter_monthly; c
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps_labs[i], col=comp_cols[i],
                                                              lty=if (comps[i] == "cLitterCwd_monthly") 2 else 1, lwd=if (comps[i] == "cLitter_monthly") 2 else 1)),
             ylab="cLitter [PgC]",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/clitter_pools_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/clitter_pools_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
@@ -188,19 +197,23 @@ if (T) { # per experiment: cSoil per pool (sum = cSoil_monthly)
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=comp_cols[i], lwd=if (comps[i] == "cSoil_monthly") 2 else 1)),
             ylab="cSoil [PgC]",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/csoil_pools_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/csoil_pools_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )
     }
 }
 
-if (T) { # per experiment: lpj's carbon budget without methane: d(cLand)/dt = -NEE + residual, residual ~ -wetland CH4 (PgC/yr, >0: into land)
+if (T) { # per experiment: land carbon budget using the coupled flux: d(cLand)/dt = -cFluxYr + residual (PgC/yr, >0: into land)
     # cLand_yearly is on dec 31 --> its difference to the previous year is the change during the year (1st year dropped); made here with cdo
+    # `cFluxYr` (gridcell.cFlux, "sent to openifs") is the real coupled flux, unlike `cflux_NEE`, which is
+    # reconstructed in LPJ-GUESS's own output code (commonoutput.cpp) from named flux components and was never
+    # updated to include wetland CH4 -- so `cFluxYr` correctly picks up the CH4 term once `ifch4tocpl` fires.
     for (exp in experiments) {
         f <- function(v) ppost(fin(v, "year", exp))
         if (force || !file.exists(f("dcLandDt_yearly"))) {
             cmds <- c(paste0("cdo -O -s -setname,dcLandDt_yearly -deltat ", f("cLand_yearly"), " ", f("dcLandDt_yearly")),
-                      paste0("cdo -O -s -setname,cLandBudgetResidual -add ", f("dcLandDt_yearly"), " -delete,timestep=1 ", f("cflux_NEE"), " ", f("cLandBudgetResidual")))
+                      paste0("cdo -O -s -setname,cLandBudgetResidual -add ", f("dcLandDt_yearly"), " -delete,timestep=1 ", f("cFluxYr_yearly"), " ", f("cLandBudgetResidual")))
             for (cmd in cmds) {
                 dir.create(dirname(sub(".* ", "", cmd)), recursive=T, showWarnings=F)
                 message("run `", cmd, "` ...")
@@ -210,11 +223,12 @@ if (T) { # per experiment: lpj's carbon budget without methane: d(cLand)/dt = -N
         plots[[length(plots)+1]] <- list(
             datas=list(
                 list(fin=fin("dcLandDt_yearly", "year", exp), label="d(cLand_yearly)/dt", col="black"),
-                list(fin=fin("cflux_NEE", "year", exp), fac=-1, label="-cflux_NEE", col=comp_cols[2]),
+                list(fin=fin("cFluxYr_yearly", "year", exp), fac=-1, label="-cFluxYr_yearly (to openifs)", col=comp_cols[2]),
                 list(fin=fin("cLandBudgetResidual", "year", exp), label="residual", col="red", lwd=2),
                 list(fin=fin("wetlandCH4_monthly", "year", exp), fac=-1, label="-wetlandCH4_monthly (as C)", col=comp_cols[3], lty=2)
             ),
             ylab="flux [PgC/yr] (>0: into land)",
+            plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cland_budget_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))
             fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cland_budget_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png"))
         )

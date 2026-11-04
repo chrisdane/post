@@ -22,7 +22,7 @@ experiments <- list(
     #list(experiment="pi_noxios", from=1850, to=1858, col="black")
     #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2229, col="black")
     #,list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", from=2230, to=2389, col="black") # from: 2230
-    list(experiment="AE3CC_pi", from=1850, to=2444, col="black") # continues from 2230 (v3.5.1-cc) where the experiment above (v3.5.0-cc) stops at 2339 -- both overlaid 2230-2339 since they're different model versions, not the same data
+    list(experiment="AE3CC_pi", from=1850, to=2609, col="black") # continues from 2230 (v3.5.1-cc) where the experiment above (v3.5.0-cc) stops at 2339 -- both overlaid 2230-2339 since they're different model versions, not the same data
 )
 
 # all annual means of the monthly output
