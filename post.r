@@ -6,9 +6,12 @@
 #
 # job fields ([o]: optional):
 #   pathin     input dir, searched recursively; brace alternatives allowed, e.g. ".../outdata/{echam,jsbach}"
-#   fpattern   input file pattern with "<year>", "<year>"+"<mon>" or "<from>"+"<to>"; "*" allowed;
+#   fpattern   input file pattern with "<year>", "<year>"+"<mon>", "<from>"+"<to>", or none of these (a
+#              fixed file or glob with no year matching at all -- then `fout` must be given explicitly,
+#              since there is no `from`-`to` to auto-name it with); "*" allowed;
 #              may include trailing dir levels, e.g. "<year>0101-<year>1231/cLand_yearly.nc"
-#   from, to   [o] year range; default: range of the found files
+#   from, to   [o] year range; default: range of the found files; not applicable (and not allowed) for a
+#              year-less `fpattern`
 #   varnamein  [o] default: 1st variable of the 1st input file
 #   varnameout [o] default: varnamein
 #   mode       "select" or a cdo statistic, e.g. "fldmean"
@@ -119,7 +122,7 @@ get_dt_from_file <- function(files, from, to) {
         if (step_days > 0) steps_per_year <- 365.25/step_days
     }
 
-    if (is.na(steps_per_year)) { # tier 2: 1st file's ntime * nfiles, over the requested years
+    if (is.na(steps_per_year) && !is.null(from) && !is.null(to)) { # tier 2: 1st file's ntime * nfiles, over the requested years (needs a year range)
         ntime1 <- suppressWarnings(as.integer(system(paste0(cdo, " -s ntime ", files[1]), intern=T)))
         n_years <- to - from + 1
         if (length(ntime1) == 1 && !is.na(ntime1) && ntime1 > 0 && n_years > 0) {
@@ -216,12 +219,13 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
     is_year <- grepl("<year>", fpattern, fixed=T)
     has_mon <- grepl("<mon>", fpattern, fixed=T)
     is_range <- grepl("<from>", fpattern, fixed=T) && grepl("<to>", fpattern, fixed=T)
-    if (!is_year && !is_range) {
-        stop("job ", jobi, "'s `fpattern` = \"", fpattern, "\" has neither a \"<year>\" placeholder nor both \"<from>\" and \"<to>\" placeholders")
-    }
+    is_static <- !is_year && !is_range # no "<year>"/"<from>"/"<to>" at all -- a fixed file or glob, no year matching
     if (has_mon && !is_year) {
         stop("job ", jobi, "'s `fpattern` = \"", fpattern, "\" has a \"<mon>\" placeholder without a \"<year>\" placeholder; ",
              "\"<mon>\" is only supported combined with \"<year>\"")
+    }
+    if (is_static && (!is.null(from) || !is.null(to))) {
+        stop("job ", jobi, "'s `fpattern` = \"", fpattern, "\" has no \"<year>\"/\"<from>\"/\"<to>\" placeholder, so `from`/`to` do not apply -- remove them from the job")
     }
 
 # regex from fpattern: <year>, <from>, <to> --> [0-9]+; <mon> --> [0-9]{2}
@@ -235,10 +239,12 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
         re <- sub("<mon>", "([0-9]{2})", re, fixed=T)
     } else if (is_year) {
         re <- paste0("^", sub("<year>", "([0-9]+)", regex_escape(fpattern), fixed=T), "$")
-    } else {
+    } else if (is_range) {
         re <- paste0("^", regex_escape(fpattern), "$")
         re <- sub("<from>", "([0-9]+)", re, fixed=T)
         re <- sub("<to>", "([0-9]+)", re, fixed=T)
+    } else { # is_static
+        re <- paste0("^", regex_escape(fpattern), "$")
     }
 # other <...> tags: wildcard
     re <- gsub("<[^<>]*>", ".*", re)
@@ -414,6 +420,11 @@ find_input_files <- function(pathin, fpattern, from, to, jobi) {
         print_head_tail(files)
         return(list(files=files, from=from, to=to, needs_year_filter=T)) # a chunk file may cover *more* years than requested
     }
+
+    if (is_static) { # no year matching/derivation/completeness check -- just whatever matched, sorted
+        message("--> found ", length(all_files), " file(s) via a static (year-less) `fpattern`")
+        return(list(files=all_files, from=NULL, to=NULL, needs_year_filter=F))
+    }
 } # find_input_files
 
 # global options; `-t` must precede the operators, `-f nc` to write code-table input as netcdf
@@ -543,6 +554,9 @@ run_job <- function(jobi) {
     }
 
     fout_given <- job_get(job, "fout")
+    if (is.null(from) && is.null(fout_given)) {
+        stop("job ", jobi, ": `fpattern` has no \"<year>\"/\"<from>\"/\"<to>\" placeholder, so there is no `from`-`to` to auto-name `fout` with -- set `fout` explicitly for this job")
+    }
     if (is.null(fout_given)) {
         dtin <- job_get(job, "dtin", get_dt_from_file(files, from, to))
         depth <- if (nzchar(level)) gsub(",", "-", level, fixed=T) else ""
@@ -556,8 +570,14 @@ run_job <- function(jobi) {
     if (file.exists(fout) && !force) {
         message("--> already exists and `force` = F --> skip")
     } else {
-        cdo_select_calc(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout)
-        if (!dry && !file.exists(fout)) stop("job ", jobi, ": `fout` = \"", fout, "\" was not created")
+        # write to a temp name and rename on success only -- a killed/interrupted job must never leave a
+        # file at `fout` that a rerun's `file.exists()` would mistake for a complete, valid result
+        fout_tmp <- if (dry) fout else paste0(fout, ".tmp_", Sys.getpid())
+        cdo_select_calc(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_tmp)
+        if (!dry) {
+            if (!file.exists(fout_tmp)) stop("job ", jobi, ": `fout` = \"", fout, "\" was not created")
+            file.rename(fout_tmp, fout)
+        }
         message("--> done: \"", fout, "\"")
     }
 
@@ -580,8 +600,10 @@ run_job <- function(jobi) {
                 # monthly: weight each month by its number of days; else all steps equally
                 op_an <- if (get_dt_from_file(fout, from, to) == "mon") "yearmonmean" else "yearmean"
                 message("--> annual mean with `cdo ", op_an, "`")
-                run_cmd(paste0(cdo_prefix(""), " ", op_an, " ", fout, " ", fout_an))
-                if (!file.exists(fout_an)) stop("job ", jobi, ": `fout_an` = \"", fout_an, "\" was not created")
+                fout_an_tmp <- paste0(fout_an, ".tmp_", Sys.getpid())
+                run_cmd(paste0(cdo_prefix(""), " ", op_an, " ", fout, " ", fout_an_tmp))
+                if (!file.exists(fout_an_tmp)) stop("job ", jobi, ": `fout_an` = \"", fout_an, "\" was not created")
+                file.rename(fout_an_tmp, fout_an)
                 message("--> done: \"", fout_an, "\"")
             }
         }

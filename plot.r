@@ -75,6 +75,10 @@ if (!user_set("ma_nyrs")) ma_nyrs <- 21 # running-mean window in years
 
 # time dim names; time goes on the x axis of contour plots
 known_time_dimnames <- c("time", "Time", "TIME", "mon")
+# depth/level dim names (varies by data source, e.g. glodap's mismatched "depth_surface", FESOM's "nz",
+# buitenhuis_etal_2013's upper-case "DEPTH"); depth goes on the inverted y axis of contour plots
+# (`mode` = "auto", 2 dims, no time) and is the sole axis of a `mode` = "profile" line plot (1 dim)
+known_depth_dimnames <- c("depth", "Depth", "DEPTH", "depth_surface", "nz", "lev", "level", "Level", "LEVEL")
 
 # "a/{x,y}/b" --> c("a/x/b", "a/y/b")
 brace_expand <- function(x) {
@@ -238,9 +242,11 @@ maybe_time_axis <- function(dimname, vals, units) {
     }
     m <- regmatches(units, regexec("^\\s*([[:alpha:]]+)\\s+since\\s+(.+?)\\s*$", units))[[1]]
     if (length(m) != 3) return(vals)
+    unit <- tolower(m[2])
     mult <- c(second=1, seconds=1, sec=1, secs=1, s=1, minute=60, minutes=60, min=60, mins=60,
-              hour=3600, hours=3600, hr=3600, hrs=3600, h=3600, day=86400, days=86400, d=86400)[tolower(m[2])]
-    if (is.na(mult)) return(vals)
+              hour=3600, hours=3600, hr=3600, hrs=3600, h=3600, day=86400, days=86400, d=86400)[unit]
+    is_month <- unit %in% c("month", "months", "mon", "mons") # not a fixed duration -- handled via POSIXlt below
+    if (is.na(mult) && !is_month) return(vals)
     origin_str <- sub("T", " ", trimws(m[3]), fixed=T)
     if (grepl("^[0-9]+$", origin_str)) origin_str <- paste0(origin_str, "-01-01 00:00:00")
     else if (grepl("^[0-9]+-[0-9]{1,2}$", origin_str)) origin_str <- paste0(origin_str, "-01 00:00:00")
@@ -248,6 +254,11 @@ maybe_time_axis <- function(dimname, vals, units) {
     else if (grepl("^[0-9]+-[0-9]{1,2}-[0-9]{1,2} [0-9]{1,2}:[0-9]{1,2}$", origin_str)) origin_str <- paste0(origin_str, ":00")
     origin <- as.POSIXct(strptime(origin_str, format="%Y-%m-%d %H:%M:%OS", tz="UTC"))
     if (is.na(origin)) return(vals)
+    if (is_month) {
+        lt <- as.POSIXlt(rep(origin, length(vals)), tz="UTC")
+        lt$mon <- lt$mon + vals
+        return(as.POSIXct(lt))
+    }
     origin + vals*mult
 } # maybe_time_axis
 
@@ -353,8 +364,17 @@ for (ploti in seq_along(plots)) {
             stop("plot ", ploti, ": `mode` = \"pairwise\" needs exactly 2 `datas`, each reduced to exactly 1 remaining dim; got ",
                  ndata, " datasets with ", paste(ndims, collapse=", "), " dim(s)")
         }
+    } else if (mode == "fldmean") { # a vertical profile, as from post.r's `mode` = "fldmean" -- value on x, depth on inverted y
+        if (!all(ndims == 1)) {
+            stop("plot ", ploti, ": `mode` = \"fldmean\" needs every `data` reduced to exactly 1 remaining dim; got ",
+                 paste(ndims, collapse=", "), " dim(s)")
+        }
+        if (any(is.na(match(sapply(datas, function(x) x$dims[1]), known_depth_dimnames)))) {
+            stop("plot ", ploti, ": `mode` = \"fldmean\" needs every `data`'s remaining dim to be a recognized depth dim (",
+                 paste(known_depth_dimnames, collapse=", "), "); got ", paste(sapply(datas, function(x) x$dims[1]), collapse=", "))
+        }
     } else if (mode != "auto") {
-        stop("plot ", ploti, ": unknown `mode` = \"", mode, "\" (\"auto\" or \"pairwise\")")
+        stop("plot ", ploti, ": unknown `mode` = \"", mode, "\" (\"auto\", \"pairwise\" or \"fldmean\")")
     }
 
     if (dry) {
@@ -396,10 +416,10 @@ for (ploti in seq_along(plots)) {
             par(mar=c(par("mar")[1], mgp[2] + ylabs_width(at) + 0.5 + 1.3, par("mar")[3:4]))
         }
 
-        if (mode == "pairwise" || (mode == "auto" && all(ndims == 1))) {
+        if (mode == "pairwise" || mode == "fldmean" || (mode == "auto" && all(ndims == 1))) {
 
             # lengths may differ, the dim must be the same
-            if (mode == "auto" && ndata > 1) {
+            if (mode %in% c("auto", "fldmean") && ndata > 1) {
                 shared_dim <- datas[[1]]$dims[1]
                 for (datai in 2:ndata) {
                     if (datas[[datai]]$dims[1] != shared_dim) {
@@ -409,7 +429,8 @@ for (ploti in seq_along(plots)) {
                 }
             }
 
-            message("--> line plot (", if (mode == "pairwise") "pairwise data1 vs data2" else paste0(ndata, " datasets vs \"", datas[[1]]$dims[1], "\""), ") ...")
+            message("--> line plot (", if (mode == "pairwise") "pairwise data1 vs data2" else if (mode == "fldmean")
+                    paste0(ndata, " profile(s) vs \"", datas[[1]]$dims[1], "\"") else paste0(ndata, " datasets vs \"", datas[[1]]$dims[1], "\""), ") ...")
             open_dev(line_width, line_height)
             if (mode == "pairwise") {
                 x <- as.vector(datas[[1]]$data); y <- as.vector(datas[[2]]$data)
@@ -420,6 +441,31 @@ for (ploti in seq_along(plots)) {
                 yaxis(usr_at(2), data_label(datas[[2]]))
                 abline(h=0, v=0, col="gray", lwd=0.5)
                 lines(x, y, col=job_get(job_datas[[1]], "col", default_cols[1]), lwd=job_get(job_datas[[1]], "lwd", 1))
+                message("run `my_dev.off(", fout, ") ...")
+                my_dev.off(fout)
+            } else if (mode == "fldmean") {
+                # depth (inverted: shallow at top) on y, value on x -- the conventional oceanographic
+                # vertical-profile orientation, unlike the regular dim-on-x line plot
+                depth_list <- lapply(datas, function(dm) dm$dimvals[[1]])
+                xr <- range(sapply(datas, function(x) range(x$data, finite=T, na.rm=T)))
+                depth_range <- range(unlist(depth_list), finite=T)
+                set_ymar(depth_range)
+                graphics::plot(0, type="n", xlim=xr, ylim=rev(depth_range), xlab="", ylab="", xaxt="n", yaxt="n")
+                axis(1, at=usr_at(1)); xtitle(job_get(job, "ylab", data_label(datas[[1]])))
+                yaxis(pretty(par("usr")[4:3], n=10), axis_label(datas[[1]]$dims[1], datas[[1]]$dimunits[1]))
+                abline(v=0, col="gray", lwd=0.5)
+                for (datai in seq_len(ndata)) {
+                    dj <- job_datas[[datai]]
+                    lines(as.vector(datas[[datai]]$data), depth_list[[datai]], col=job_get(dj, "col", default_cols[(datai - 1) %% length(default_cols) + 1]),
+                          lty=job_get(dj, "lty", 1), lwd=job_get(dj, "lwd", 1))
+                }
+                if (ndata > 1) {
+                    pos <- job_get(job, "legend_pos", "topright")
+                    if (is.numeric(pos)) pos <- list(x=pos[1], y=pos[2])
+                    do.call(legend, c(list(x=pos), list(legend=sapply(datas, "[[", "label"),
+                             col=sapply(seq_len(ndata), function(i) job_get(job_datas[[i]], "col", default_cols[(i - 1) %% length(default_cols) + 1])),
+                             lty=sapply(job_datas, function(dj) job_get(dj, "lty", 1)), lwd=sapply(job_datas, function(dj) job_get(dj, "lwd", 1)), bty="n")))
+                }
                 message("run `my_dev.off(", fout, ") ...")
                 my_dev.off(fout)
             } else {
@@ -522,15 +568,24 @@ for (ploti in seq_along(plots)) {
 
         } else if (all(ndims == 2)) {
 
-            # time (if any) on the x axis
+            # time (if any), else depth, on the x axis -- wait, on the y axis: depth is more naturally the
+            # y axis (inverted: shallow at top), as for a zonal-mean section (lat on x, depth on y)
             x <- vector("list", ndata); y <- vector("list", ndata); z <- vector("list", ndata)
             dims_ordered <- vector("list", ndata)
+            is_depth_y <- F
             for (datai in seq_len(ndata)) {
                 dm <- datas[[datai]]
                 time_ind <- which(!is.na(match(dm$dims, known_time_dimnames)))
-                ord <- if (length(time_ind) == 1) c(time_ind, setdiff(1:2, time_ind)) else 1:2
-                x[[datai]] <- dm$dimvals[[ord[1]]]
-                y[[datai]] <- dm$dimvals[[ord[2]]]
+                depth_ind <- which(!is.na(match(dm$dims, known_depth_dimnames)))
+                ord <- if (length(time_ind) == 1) c(time_ind, setdiff(1:2, time_ind))
+                       else if (length(depth_ind) == 1) c(setdiff(1:2, depth_ind), depth_ind)
+                       else 1:2
+                if (length(time_ind) != 1 && length(depth_ind) == 1) is_depth_y <- T
+                # convert a recognized time dim to POSIXct (image.plot.nxm formats it as calendar dates/
+                # years via `axis.POSIXct` automatically); raw "<n> seconds/days since ..." values
+                # otherwise, as for the 1-dim line-plot path above
+                x[[datai]] <- maybe_time_axis(dm$dims[ord[1]], dm$dimvals[[ord[1]]], dm$dimunits[ord[1]])
+                y[[datai]] <- maybe_time_axis(dm$dims[ord[2]], dm$dimvals[[ord[2]]], dm$dimunits[ord[2]])
                 z[[datai]] <- if (ord[1] == 1) dm$data else t(dm$data)
                 dims_ordered[[datai]] <- list(names=dm$dims[ord], units=dm$dimunits[ord])
             }
@@ -542,10 +597,18 @@ for (ploti in seq_along(plots)) {
             message("--> contour plot (", ndata, " panel(s), zlim = [", round(zlim[1], 3), ", ", round(zlim[2], 3), "]) ...")
             ip <- image.plot.pre(zlim=zlim, nlevels=nlevels)
             open_dev(if (ndata > 1) contour_width else contour_width/1.3, contour_height)
-            args <- list(x=x, y=y, z=z, ip=ip,
-                         xlab=axis_label(dims_ordered[[1]]$names[1], dims_ordered[[1]]$units[1]),
-                         ylab=axis_label(dims_ordered[[1]]$names[2], dims_ordered[[1]]$units[2]),
+            axlab <- function(i) if (inherits(x[[1]], "POSIXct") && i == 1 || inherits(y[[1]], "POSIXct") && i == 2) "time"
+                                  else axis_label(dims_ordered[[1]]$names[i], dims_ordered[[1]]$units[i])
+            args <- list(x=x, y=y, z=z, ip=ip, xlab=axlab(1), ylab=axlab(2),
                          zlab=zlab, znames_labels=znames, plot_type="active")
+            if (is_depth_y) args$ylim <- job_get(job, "ylim", rev(range(unlist(y), finite=T)))
+            # a 12-step POSIXct axis is a monthly climatology (e.g. post.r's "..._ymon" modes) -- cdo's
+            # `ymonmean` assigns each month's *own* mean timestamp across the input period, which can land
+            # in different (and non-chronological) calendar years per month -- misleading as real dates
+            # (e.g. "2025-03" .. "2026-01" for a plain Jan-Dec climatology); label by month name instead
+            month_ticks <- function(v) if (inherits(v, "POSIXct") && length(v) == 12) list(at=v, labels=format(v, "%b")) else NULL
+            mt <- month_ticks(x[[1]]); if (!is.null(mt)) { args$x_at <- mt$at; args$x_labels <- mt$labels }
+            mt <- month_ticks(y[[1]]); if (!is.null(mt)) { args$y_at <- mt$at; args$y_labels <- mt$labels }
             job_n <- job_get(job, "n"); if (!is.null(job_n)) args$n <- job_n
             job_m <- job_get(job, "m"); if (!is.null(job_m)) args$m <- job_m
             do.call(image.plot.nxm, args)
