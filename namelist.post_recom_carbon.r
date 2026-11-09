@@ -34,7 +34,8 @@ if (F) { # levante
     experiments <- list(
         #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.0-cc/AWI-ESM3-CC-LR-CMIP7-Spinup/outdata/fesom", from=2060)
         list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/fesom", from=2600, to=2609), # from: 2230; 2230-2599 already post-processed
-        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/fesom", from=2610, to=2619) # new years; merge_chunks.r merges this with the 2600-2609 chunk above
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/fesom", from=2610, to=2619), # merge_chunks.r merges this with the 2600-2609 chunk above
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/fesom", from=2620, to=2649) # new years; merge_chunks.r merges this with the existing 1850-2619 merge above
     )
     fgriddes <- "/albedo/work/user/cdanek/mesh/fesom2/core3/griddes_core3_node.nc"
     fnod_area_3d <- "/albedo/work/user/cdanek/mesh/fesom2/core3/nod_area_3d_core3.nc"

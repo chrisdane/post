@@ -18,21 +18,25 @@
 #   mode_name  [o] name of `mode` in fout/pathout, e.g. "fldmean" for mode = "fldsum" with weights; default: mode
 #   mode_args  [o] e.g. mode = "zonmean", mode_args = "zonal_1" --> "-zonmean,zonal_1"
 #   dtin       [o] <dtin> in fout; default: inferred from the input; set if cdo_pre changes the frequency
-#   level      [o] level(s) to select, e.g. "0,10,50"
+#   level      [o] level(s) to select, by VALUE, e.g. "0,10,50" -- give this or `levidx`, not both
+#   levidx     [o] level(s) to select, by INDEX (1-based), e.g. "1,3,5" -- give this or `level`, not both
 #   code       [o] cdo code table (`cdo -t`), or a pattern like fpattern
 #   cdo_pre    [o] cdo operators before `mode`, e.g. "-remapycon,r180x90 -setgrid,mesh.nc"
 #   cdo_post   [o] cdo operators after `mode`, e.g. "-setunit,ppm -mulc,2"; run per chunk if the files are split
 #   setup      model setup, e.g. "AWI-ESM-1-REcoM"
 #   model      [o] model component, e.g. "recom"
-#   experiment e.g. "esm-ssp585"
+#   experiment [o] e.g. "esm-ssp585"
 #   variant    [o] default: "r1i1p1f1"
 #   grid       [o] default: "gn"
 #   pathout    [o] default: pathin; "/<setup>/<mode_name>/<varnameout>" is appended
 #   fout       [o] default: <varnameout>_<dtin>_<mode_name>[_<depth>]_<setup>[_<model>]_<experiment>_<variant>_<grid>_<from>-<to>.nc
 #   do         [o] F: skip the job; default: T
 # if `save_fout_an`, the annual mean of a sub-annual time series fout is also saved (<dtin> = "year")
-# `mc_cores` > 1 runs the jobs in parallel (parallel::mclapply); each job's console output is captured and
-# printed, in job order, only after that job finishes -- avoids interleaved/garbled output across workers
+# `mc_cores` > 1 runs the jobs in parallel (parallel::mclapply); each job's console output (incl. every
+# `message()` before a system() call, e.g. run_cmd()'s "run `<cmd>` ...") is captured and printed, in job
+# order, only after that job finishes -- avoids interleaved/garbled output across concurrent workers, the
+# unavoidable tradeoff of true parallelism; with `mc_cores` = 1 there is no such concurrency, so every
+# `message()` instead prints live, as it happens
 
 message("\n****************** post.r start ******************")
 
@@ -48,15 +52,19 @@ if (!user_set("clean")) clean <- T # if T: remove temporary chunk/select files
 if (!user_set("save_fout_an")) save_fout_an <- T # if T: also save the annual mean (`fout_an`) of a sub-annual time series `fout`
 if (!user_set("mc_cores")) mc_cores <- 1 # if >1: run jobs in parallel via parallel::mclapply() (jobs are independent of each other); Linux only (fork-based)
 if (!user_set("cdo")) {
+    message("run `which cdo` ...")
     cdo <- suppressWarnings(system("which cdo", intern=T, ignore.stderr=T))
     if (length(cdo) != 1 || !nzchar(cdo)) stop("could not find `cdo` on PATH; set `cdo <- \"/path/to/cdo\"` in the namelist")
 }
-if (!user_set("cdo_nthreads")) cdo_nthreads <- max(1, trunc(0.75*as.integer(system("nproc", intern=T))))
+if (!user_set("cdo_nthreads")) {
+    message("run `nproc` ...")
+    cdo_nthreads <- max(1, trunc(0.75*as.integer(system("nproc", intern=T))))
+}
 if (!user_set("jobs")) stop("must provide a `jobs` list before sourcing post.r; see namelist.post_fesom_recom.r for an example")
 
 # every job a named list of known fields
 known_fields <- c("pathin", "fpattern", "from", "to", "varnamein", "varnameout",
-                  "mode", "mode_name", "mode_args", "dtin", "level", "code", "cdo_pre", "cdo_post",
+                  "mode", "mode_name", "mode_args", "dtin", "level", "levidx", "code", "cdo_pre", "cdo_post",
                   "setup", "model", "experiment", "variant", "grid", "pathout", "fout", "do")
 if (!is.list(jobs) || length(jobs) == 0) stop("`jobs` must be a non-empty list of jobs")
 for (jobi in seq_along(jobs)) {
@@ -72,6 +80,7 @@ for (jobi in seq_along(jobs)) {
 }
 
 # ---- cdo version (need to know if selection+statistic can be chained: cdo >= 1.9.4) ----
+message("run `", cdo, " --version` ...")
 cdo_version_str <- system(paste0(cdo, " --version"), intern=T, ignore.stderr=T)[1] # e.g. "Climate Data Operators version 2.6.0 (...)"
 cdo_version <- regmatches(cdo_version_str, regexpr("[0-9]+\\.[0-9]+\\.[0-9]+", cdo_version_str))
 if (length(cdo_version) != 1) stop("could not parse a version number (X.Y.Z) from `cdo --version` output: \"", cdo_version_str, "\"")
@@ -80,6 +89,7 @@ cdo_can_chain <- cdo_version >= base::numeric_version("1.9.4")
 message("cdo = ", cdo, " (version ", cdo_version, ", ", if (!cdo_can_chain) "cannot" else "can", " chain selection+statistic)")
 
 # max command length: system() runs `sh -c "<cmd>"`, 1 argument limited to MAX_ARG_STRLEN = 131072
+message("run `getconf ARG_MAX` ...")
 cdo_nchar_max_arglist <- trunc(0.9*min(as.integer(system("getconf ARG_MAX", intern=T)), 131072)) # 10% safety margin
 
 ##################################################################################
@@ -94,8 +104,17 @@ run_cmd <- function(cmd, files=NULL) {
     }
     message("run `", msg, "` ...")
     if (!dry) {
-        check <- system(cmd)
-        if (check != 0) stop("command failed with exit status ", check)
+        # plain `system(cmd)` lets the child process (cdo) write its own stdout/stderr straight to the
+        # inherited terminal fd -- that bypasses message()/sink() entirely, so cdo's own progress lines
+        # (e.g. "cdo(1) fldmean: Process started") show up unbuffered and out of order with the "run `...`"
+        # message above (in parallel mode especially: that message sits in its job's sink buffer until the
+        # whole job finishes, while cdo's own output appears immediately). Capture it (stderr merged in,
+        # since that's where cdo's progress output goes) and re-emit via message() so it goes through the
+        # same sink and stays in order with the command that produced it, in both live and buffered modes.
+        out <- suppressWarnings(system(paste0(cmd, " 2>&1"), intern=T))
+        status <- attr(out, "status"); if (is.null(status)) status <- 0L
+        if (length(out) > 0) message(paste(out, collapse="\n"))
+        if (status != 0) stop("command failed with exit status ", status)
     }
 }
 
@@ -104,8 +123,10 @@ mode_to_calc <- function(mode, mode_args) {
     if (mode == "select") "" else paste0("-", mode, if (nzchar(mode_args)) paste0(",", mode_args) else "")
 }
 # year filter only for "<from>"/"<to>" chunk files; with "<year>" files it can crash cdo when chunked
-sel_op <- function(varnamein, level, from, to, needs_year_filter) {
-    paste0("-select,name=", varnamein, if (nzchar(level)) paste0(",level=", level) else "",
+sel_op <- function(varnamein, level, levidx, from, to, needs_year_filter) {
+    if (nzchar(level) && nzchar(levidx)) stop("`level` and `levidx` are both set -- give one or the other, not both")
+    paste0("-select,name=", varnamein,
+           if (nzchar(level)) paste0(",level=", level) else if (nzchar(levidx)) paste0(",levidx=", levidx) else "",
            if (needs_year_filter) paste0(",year=", from, "/", to) else "")
 }
 
@@ -113,7 +134,9 @@ sel_op <- function(varnamein, level, from, to, needs_year_filter) {
 get_dt_from_file <- function(files, from, to) {
     steps_per_year <- NA_real_
 
-    ts <- suppressWarnings(system(paste0(cdo, " -s showtimestamp ", files[1]), intern=T))
+    cmd <- paste0(cdo, " -s showtimestamp ", files[1])
+    message("run `", cmd, "` ...")
+    ts <- suppressWarnings(system(cmd, intern=T))
     ts <- trimws(strsplit(paste(ts, collapse=" "), "[[:space:]]+")[[1]])
     ts <- ts[nzchar(ts)]
     ts <- tryCatch(as.POSIXct(ts, tz="UTC"), error=function(e) NULL)
@@ -123,7 +146,9 @@ get_dt_from_file <- function(files, from, to) {
     }
 
     if (is.na(steps_per_year) && !is.null(from) && !is.null(to)) { # tier 2: 1st file's ntime * nfiles, over the requested years (needs a year range)
-        ntime1 <- suppressWarnings(as.integer(system(paste0(cdo, " -s ntime ", files[1]), intern=T)))
+        cmd <- paste0(cdo, " -s ntime ", files[1])
+        message("run `", cmd, "` ...")
+        ntime1 <- suppressWarnings(as.integer(system(cmd, intern=T)))
         n_years <- to - from + 1
         if (length(ntime1) == 1 && !is.na(ntime1) && ntime1 > 0 && n_years > 0) {
             steps_per_year <- ntime1*length(files)/n_years
@@ -140,11 +165,17 @@ get_dt_from_file <- function(files, from, to) {
 # TRUE if `f` is a time series (1 grid point and 1 level for every variable)
 # with more time steps than years, i.e. finer than annual
 is_subannual_timeseries <- function(f) {
-    cdo_int <- function(op) suppressWarnings(as.integer(system(paste0(cdo, " -s ", op, " ", f), intern=T)))
+    cdo_int <- function(op) {
+        cmd <- paste0(cdo, " -s ", op, " ", f)
+        message("run `", cmd, "` ...")
+        suppressWarnings(as.integer(system(cmd, intern=T)))
+    }
     ngp <- cdo_int("ngridpoints")
     nlev <- cdo_int("nlevel")
     ntime <- cdo_int("ntime")
-    years <- suppressWarnings(system(paste0(cdo, " -s showyear ", f), intern=T))
+    cmd <- paste0(cdo, " -s showyear ", f)
+    message("run `", cmd, "` ...")
+    years <- suppressWarnings(system(cmd, intern=T))
     years <- unique(strsplit(trimws(paste(years, collapse=" ")), "[[:space:]]+")[[1]])
     length(ngp) > 0 && !anyNA(ngp) && all(ngp == 1) &&
         length(nlev) > 0 && !anyNA(nlev) && all(nlev == 1) &&
@@ -433,9 +464,9 @@ cdo_prefix <- function(codes) {
 }
 
 # 1 cdo call: select, cdo_pre, mode, cdo_post, setname; 2 calls for cdo < 1.9.4
-cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_i) {
+cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, level, levidx, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_i) {
     calc <- mode_to_calc(mode, mode_args)
-    sel <- sel_op(varnamein, level, from, to, needs_year_filter)
+    sel <- sel_op(varnamein, level, levidx, from, to, needs_year_filter)
     filestr <- paste(files, collapse=" ")
 
     if (cdo_can_chain) {
@@ -454,14 +485,14 @@ cdo_select_calc_1cmd <- function(files, varnamein, varnameout, mode, mode_args, 
 } # cdo_select_calc_1cmd
 
 # as cdo_select_calc_1cmd(), split into chunks if the command is too long, then `cdo cat`
-cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout) {
+cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level, levidx, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout) {
     nchar_fixed <- nchar(paste0(cdo_prefix(codes), " ", cdo_post, " -setname,", varnameout, " ", mode_to_calc(mode, mode_args), " ", cdo_pre,
-                                " ", sel_op(varnamein, level, from, to, needs_year_filter), " ", fout))
+                                " ", sel_op(varnamein, level, levidx, from, to, needs_year_filter), " ", fout))
     nchar_per_file <- nchar(files) + 1L # +1 for the separating space
     nchar_total <- nchar_fixed + sum(nchar_per_file)
 
     if (nchar_total <= cdo_nchar_max_arglist) { # fits in 1 command -- the common case
-        cdo_select_calc_1cmd(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout)
+        cdo_select_calc_1cmd(files, varnamein, varnameout, mode, mode_args, level, levidx, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout)
         return(invisible())
     }
 
@@ -476,7 +507,7 @@ cdo_select_calc <- function(files, varnamein, varnameout, mode, mode_args, level
         message("\nchunk ", chunki, "/", nchunks, " ...")
         i_from <- chunk_starts[chunki]
         i_to <- min(i_from + nfiles_per_chunk - 1, length(files))
-        cdo_select_calc_1cmd(files[i_from:i_to], varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_chunks[chunki])
+        cdo_select_calc_1cmd(files[i_from:i_to], varnamein, varnameout, mode, mode_args, level, levidx, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_chunks[chunki])
     }
 
     message("\ncat ", nchunks, " chunks together ...")
@@ -501,7 +532,7 @@ run_job <- function(jobi) {
     }
 
 # required fields
-    required <- c("pathin", "fpattern", "mode", "setup", "experiment")
+    required <- c("pathin", "fpattern", "mode", "setup")
     missing <- required[!sapply(required, function(f) !is.null(job_get(job, f)))]
     if (length(missing) > 0) stop("job ", jobi, " is missing required field(s): ", paste(missing, collapse=", "))
 
@@ -509,6 +540,7 @@ run_job <- function(jobi) {
     mode_args <- job_get(job, "mode_args", "")
     mode_name <- job_get(job, "mode_name", mode)
     level <- job_get(job, "level", "")
+    levidx <- job_get(job, "levidx", "")
     codes <- job_get(job, "code", "") # resolved below
     cdo_pre <- job_get(job, "cdo_pre", "")
     cdo_post <- job_get(job, "cdo_post", "")
@@ -530,6 +562,7 @@ run_job <- function(jobi) {
     varnamein <- job_get(job, "varnamein")
     if (is.null(varnamein)) {
         cmd <- paste0(cdo, " -s ", if (nzchar(codes)) paste0("-t ", codes, " -f nc ") else "", "showname ", files[1])
+        message("run `", cmd, "` ...")
         varnamein <- trimws(system(cmd, intern=T))
         varnamein <- strsplit(varnamein, "[[:space:]]+")[[1]][1] # take the 1st in case several
         if (is.na(varnamein) || !nzchar(varnamein)) stop("job ", jobi, ": could not determine `varnamein` via `", cmd, "`; set it explicitly")
@@ -554,14 +587,13 @@ run_job <- function(jobi) {
     }
 
     fout_given <- job_get(job, "fout")
-    if (is.null(from) && is.null(fout_given)) {
-        stop("job ", jobi, ": `fpattern` has no \"<year>\"/\"<from>\"/\"<to>\" placeholder, so there is no `from`-`to` to auto-name `fout` with -- set `fout` explicitly for this job")
-    }
     if (is.null(fout_given)) {
         dtin <- job_get(job, "dtin", get_dt_from_file(files, from, to))
-        depth <- if (nzchar(level)) gsub(",", "-", level, fixed=T) else ""
-        segs <- c(varnameout, dtin, mode_name, depth, job_get(job, "setup"), job_get(job, "model", ""), job_get(job, "experiment"), variant, grid)
-        fout <- paste0(pathout, "/", paste(segs[nzchar(segs)], collapse="_"), "_", from, "-", to, ".nc")
+        depth <- if (nzchar(level)) gsub(",", "-", level, fixed=T) else if (nzchar(levidx)) paste0("idx", gsub(",", "-", levidx, fixed=T)) else ""
+        segs <- c(varnameout, dtin, mode_name, depth, job_get(job, "setup"), job_get(job, "model", ""), job_get(job, "experiment", ""), variant, grid)
+        # `from`/`to` are NULL for a year-less `fpattern` (no "<year>"/"<from>"/"<to>" placeholder) -- just
+        # omit the "_<from>-<to>" segment then, rather than requiring `fout` to be set explicitly
+        fout <- paste0(pathout, "/", paste(segs[nzchar(segs)], collapse="_"), if (!is.null(from) && !is.null(to)) paste0("_", from, "-", to), ".nc")
     } else {
         fout <- paste0(pathout, "/", fout_given)
     }
@@ -573,7 +605,7 @@ run_job <- function(jobi) {
         # write to a temp name and rename on success only -- a killed/interrupted job must never leave a
         # file at `fout` that a rerun's `file.exists()` would mistake for a complete, valid result
         fout_tmp <- if (dry) fout else paste0(fout, ".tmp_", Sys.getpid())
-        cdo_select_calc(files, varnamein, varnameout, mode, mode_args, level, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_tmp)
+        cdo_select_calc(files, varnamein, varnameout, mode, mode_args, level, levidx, from, to, needs_year_filter, codes, cdo_pre, cdo_post, fout_tmp)
         if (!dry) {
             if (!file.exists(fout_tmp)) stop("job ", jobi, ": `fout` = \"", fout, "\" was not created")
             file.rename(fout_tmp, fout)
@@ -587,7 +619,7 @@ run_job <- function(jobi) {
         message("--> `save_fout_an` = T: check if data is 1) time series and 2) sub-annual ...")
         fout_an <- if (is.null(fout_given)) {
             segs[2] <- "year" # <dtin>
-            paste0(pathout, "/", paste(segs[nzchar(segs)], collapse="_"), "_", from, "-", to, ".nc")
+            paste0(pathout, "/", paste(segs[nzchar(segs)], collapse="_"), if (!is.null(from) && !is.null(to)) paste0("_", from, "-", to), ".nc")
         } else {
             sub("(\\.nc)?$", "_an.nc", fout)
         }
@@ -622,13 +654,20 @@ run_job_captured <- function(jobi) {
     res$out <- mclapply_buf
     res
 }
+# no capture at all: with 1 worker there is no concurrent writer to interleave with, so every `message()`
+# (e.g. `run_cmd()`'s "run `<system cmd>` ..." before each system()) prints live, as it happens
+run_job_live <- function(jobi) {
+    res <- tryCatch(run_job(jobi), error=function(e) list(jobi=jobi, status="error", error=conditionMessage(e)))
+    res$out <- character(0) # already printed live -- nothing left to print after the fact
+    res
+}
 
 results <- if (mc_cores > 1) {
     parallel::mclapply(seq_along(jobs), run_job_captured, mc.cores=mc_cores, mc.preschedule=F) # preschedule=F: job durations vary a lot (e.g. 2d vs 3d+vertint)
 } else {
-    lapply(seq_along(jobs), run_job_captured)
+    lapply(seq_along(jobs), run_job_live)
 }
-for (res in results) cat(paste(res$out, collapse="\n"), "\n", sep="") # print each job's captured output, in job order, not interleaved
+for (res in results) cat(paste(res$out, collapse="\n"), "\n", sep="") # print each job's captured output, in job order, not interleaved (`mc_cores` = 1: `res$out` is already empty, already printed live)
 errored <- Filter(function(r) identical(r$status, "error"), results)
 if (length(errored) > 0) stop("job ", errored[[1]]$jobi, " failed: ", errored[[1]]$error)
 not_done <- sapply(Filter(function(r) identical(r$status, "not_done"), results), "[[", "jobi")

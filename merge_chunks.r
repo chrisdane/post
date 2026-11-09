@@ -236,7 +236,13 @@ for (groupi in seq_along(groups)) {
         if (dry) {
             message("--> `clean` = T: would remove the ", length(gfiles), " individual chunk file(s) above (skipped: `dry` = T)")
         } else {
-            nt_in <- suppressWarnings(as.integer(system(paste0(cdo, " -s ntime \"", paste(gfiles, collapse="\" \""), "\""), intern=T)))
+            # `cdo ntime` does not accept more than 1 input file at all (hard error, empty stdout) -- call
+            # it once per file and sum, instead of passing all of `gfiles` to 1 call
+            nt_in_each <- vapply(gfiles, function(f) {
+                v <- suppressWarnings(as.integer(system(paste0(cdo, " -s ntime ", shQuote(f)), intern=T)))
+                if (length(v) == 1) v else NA_integer_
+            }, integer(1))
+            nt_in <- if (!anyNA(nt_in_each)) sum(nt_in_each) else NA_integer_
             nt_out <- suppressWarnings(as.integer(system(paste0(cdo, " -s ntime ", fout), intern=T)))
             if (length(nt_in) == 1 && length(nt_out) == 1 && !is.na(nt_in) && !is.na(nt_out) && nt_in == nt_out) {
                 message("--> `clean` = T: ", nt_out, " time step(s) verified in `fout` --> remove the ", length(gfiles), " individual chunk file(s)")

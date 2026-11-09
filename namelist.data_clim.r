@@ -1,6 +1,6 @@
 # r
 
-# Plots of namelist.post_data_fesom_recom_clim.r's output, on its own (no FESOM/REcoM comparison -- see
+# Plots of namelist.post_data_oce.r's output, on its own (no FESOM/REcoM comparison -- see
 # namelist.plot_data_fesom_recom_clim.r for that): maps (`timmean`, 1 per depth for a 3D variable --
 # plot.r draws 1 or 2 dims, so a 3rd (depth) is sliced via `index`), zonal means (line plot vs latitude
 # for 2D variables; lat-depth section for 3D ones) and vertical profiles (`mode` = "fldmean", 3D

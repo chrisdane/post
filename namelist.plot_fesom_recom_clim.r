@@ -2,7 +2,7 @@
 
 # Plots of namelist.post_fesom_recom_clim.r's output: zonal means (line plot vs latitude for 2D
 # variables; lat-depth section for 3D ones) and vertical profiles (`mode` = "fldmean", 3D variables only;
-# added to plot.r for this). Comparison with namelist.post_data_fesom_recom_clim.r's obs output is a
+# added to plot.r for this). Comparison with namelist.post_data_oce.r's obs output is a
 # separate, later namelist (not done here) -- this is a sanity-check of the FESOM/REcoM side on its own.
 #
 # `timmean`/`ymonmean` (full lon-lat(-depth) fields on FESOM's unstructured mesh) and `zonmean_ymon` of 3D

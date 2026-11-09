@@ -1,6 +1,6 @@
 # r
 
-# Side-by-side comparison of namelist.post_data_fesom_recom_clim.r's (obs) and
+# Side-by-side comparison of namelist.post_data_oce.r's (obs) and
 # namelist.post_fesom_recom_clim.r's (FESOM/REcoM) output, per the variable pairing established
 # throughout both of those namelists' own comments (`pairs` below). For standalone (no-comparison) plots
 # of just the obs side, see namelist.data_clim.r.
@@ -39,7 +39,6 @@ if (grepl("levante|^l[0-9]{5}", hostname)) {
 
 cdo <- "/albedo/soft/sw/spack-sw/cdo/2.6.0-7vr4w3i/bin/cdo"
 fesom_mesh_griddes <- "/albedo/work/user/cdanek/mesh/fesom2/core3/griddes_core3_node.nc"
-remap_dir <- file.path(pathpost, "AWI-ESM-3-REcoM_remapped") # cache dir for maps remapped onto an obs grid
 
 # as in namelist.post_fesom_recom_clim.r
 setup <- "AWI-ESM-3-REcoM"
@@ -74,6 +73,19 @@ nc_var_dims <- function(f) {
 }
 nearest_idx <- function(vals, want) which.min(abs(vals - want))
 
+# `varname`'s units attribute in `f`; used to build a map's zlab from the FESOM variable alone (e.g.
+# "salt [psu]"), not `data_label()`'s default of the *obs* dataset's label (e.g. "glodap salinity [...]")
+var_units <- function(f, varname) {
+    nc <- nc_open(f); on.exit(nc_close(nc))
+    att <- ncatt_get(nc, varname, "units")
+    if (att$hasatt) att$value else ""
+}
+map_zlab <- function(p, model_f) {
+    units <- var_units(model_f, p$fesom_var)
+    units <- sub("^\\[(.*)\\]$", "\\1", units) # some FESOM/REcoM vars store units already bracketed, e.g. "[mmol/m3]"
+    if (nzchar(units)) paste0(p$fesom_var, " [", units, "]") else p$fesom_var
+}
+
 # remap FESOM/REcoM's `var` timmean map onto `target_f`'s own grid -- at the depth nearest `depth_want`
 # (3D variable; `target_f`'s own nearest depth is picked by the caller) or the whole field (2D variable,
 # `depth_want` = NULL). cdo accepts a plain data file in place of a griddes to define the target grid.
@@ -86,7 +98,9 @@ remap_fesom_map <- function(var, target_f, depth_want=NULL) {
     survive <- dd$lens > 1
     depth_i <- which(survive & !is.na(match(dd$names, known_depth_dimnames)))
     if (length(depth_i) == 1) {
-        if (is.null(depth_want)) stop("remap_fesom_map(\"", var, "\"): FESOM file has a depth dim but no `depth_want` given")
+        # e.g. FESOM's "Chl" (DiaChl+PhyChl) has a depth dim even though the paired obs product
+        # (cmems/lewis_etal_2022 surface ocean-colour chlorophyll) is 2D -- compare against the surface
+        if (is.null(depth_want)) depth_want <- 0
         k <- nearest_idx(dd$vals[[depth_i]], depth_want)
         sellev <- paste0("-sellevidx,", k)
         tag <- paste0(dd$names[depth_i], round(dd$vals[[depth_i]][k], 1))
@@ -94,30 +108,62 @@ remap_fesom_map <- function(var, target_f, depth_want=NULL) {
         sellev <- ""
         tag <- "2d"
     }
-    outdir <- file.path(remap_dir, "timmean", var)
-    dir.create(outdir, recursive=T, showWarnings=F)
+    outdir <- dirname(fesom_f) # next to the unstructured input, not a separate tree
     fout <- file.path(outdir, paste0(var, "_timmean_remap_", tag, "_onto_", tools::file_path_sans_ext(basename(target_f)), ".nc"))
     if (!file.exists(fout) || force) {
-        cmd <- paste0(cdo, " -O -s remapcon,", target_f, " ", sellev, " -setgrid,", fesom_mesh_griddes, " ", fesom_f, " ", fout)
+        fout_tmp <- paste0(fout, ".tmp_", Sys.getpid()) # write-then-rename: a killed run must not leave a
+                                                         # corrupt file that a later run's `file.exists(fout)` mistakes for done
+        cmd <- paste0(cdo, " -O -s remapcon,", target_f, " ", sellev, " -setgrid,", fesom_mesh_griddes, " ", fesom_f, " ", fout_tmp)
         message("run `", cmd, "` ...")
-        if (system(cmd) != 0) {
+        if (system(cmd) != 0 || !file.exists(fout_tmp)) {
             message("--> remap failed -- skip this map")
+            unlink(fout_tmp)
             return(NULL)
         }
+        file.rename(fout_tmp, fout)
     }
     fout
 }
 
 #####################################################################################################
 
+# unit conversions (`fac`, applied to the obs/data side via plot.r's existing `fac` option) -- checked
+# against py_f2recom's own code (github.com/RECOM-Regulated-Ecosystem-Model/py_f2recom, `develop` branch):
+# - DIC_Glodap/Alk_Glodap/DIN_WOA_Comparison_python3.ipynb all explicitly label GLODAP/WOA's native
+#   "micromol/kg" the same as FESOM's "mmol/m3" ("unitfesom = '... [mmol m$^{-3}$] # equals to mumol/L'",
+#   i.e. no seawater-density correction) -- `fac` omitted (1) for DIC/Alk/DIN/DSi/O2 here too, matching
+#   that convention exactly (DSi/O2 aren't in py_f2recom's own set, but same unit pair, same treatment).
+# - DiaC_MarEDAT_python3.ipynb carries (commented out) "#DiaC = DiaC * 12.01" with FESOM's DiaC labelled
+#   "[mmol C m-3]" vs MarEDAT's "[mg C m-3]" -- confirms the intended conversion (just disabled in their
+#   code); applied here (`fac` = 1/12.01, converting MarEDAT/buitenhuis's mg C/L obs data to FESOM's own
+#   mmol C/m3) for all 5 buitenhuis_etal_2013 pairs.
+# - NPPsurf_OCNPP_Comparison_python3.ipynb notes the same "C: 12.01 g/mol" (also effectively disabled,
+#   printing "FESOM data in not converted...") for mg C m-2 d-1 (obs) vs REcoM's mmol C m-2 d-1 -- applied
+#   here for cmems's PP vs NPP.
+# - CO2fluxSpatialTakahashi_python3.ipynb: "CO2ffesom = -365.*CO2ffesom/1000." for mmolC/m2/d <-> molC/m2/yr
+#   (FESOM -> Takahashi direction, with an extra sign flip specific to Takahashi's own convention).
+#   gregor_and_fay_2021/SeaFlux's fgco2 mean is -0.54 molC/m2/yr (globally, i.e. net *into* ocean under a
+#   ">0: into atmosphere" convention -- physically correct, the ocean is a net sink), while FESOM's CO2f
+#   mean is +0.79 mmolC/m2/d under its own documented ">0: into the surface water" convention -- opposite
+#   signs, so despite the initial (wrong) assumption that these already matched, a sign flip IS needed here;
+#   applied as `fac` = -1000/365 for gregor_and_fay_2021's fgco2.
+# - huang_etal_2022's dFe (nmol/L) has no py_f2recom precedent (PISCES, their own DFe comparison, is
+#   already in matching mmol/m3) -- nmol/L -> mmol/m3 is an exact volumetric conversion (`fac` = 1e-3),
+#   not a density-dependent one like DIC/Alk/DIN/DSi/O2, so applied regardless.
+# - temp/salt/pCO2s/chlorophyll (CHL, chlor_a, DiaChl+PhyChl): units already match on both sides, no
+#   `fac` needed.
+# - MLD3 (Griffies mixed layer depth): FESOM reports it as a *negative* z-coordinate (min/mean/max =
+#   -941/-56/-7.5 m), while de_boyer_montegut_etal_2023's mld_dr003 is a *positive* depth-below-surface
+#   (min/mean/max = 10/55/311 m) -- same units (m), opposite sign convention. Flipped via `fesom_fac`
+#   (applied to the model side, so the report keeps everyone else's positive-depth convention).
 pairs <- list(
     # buitenhuis_etal_2013 (PFT biomass) vs REcoM PFT carbon; Phaeocystis has no REcoM PFT counterpart
-    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Diatoms",          fesom_var="DiaC"),
-    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Coccolithophores", fesom_var="PhyCalc"),
-    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Microzooplankton", fesom_var="HetC"),
-    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Mesozooplankton",  fesom_var="Zoo2C"),
-    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Macrozooplankton", fesom_var="Zoo3C"),
-    list(dataset="de_boyer_montegut_etal_2023", varname="mld_dr003",   fesom_var="MLD3"),
+    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Diatoms",          fesom_var="DiaC",    fac=1/12.01), # obs ug/L (=mg C/m3) -> FESOM mmol C/m3
+    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Coccolithophores", fesom_var="PhyCalc", fac=1/12.01), # obs ug/L (=mg C/m3) -> FESOM mmol C/m3
+    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Microzooplankton", fesom_var="HetC",    fac=1/12.01), # obs ug/L (=mg C/m3) -> FESOM mmol C/m3
+    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Mesozooplankton",  fesom_var="Zoo2C",   fac=1/12.01), # obs ug/L (=mg C/m3) -> FESOM mmol C/m3
+    list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Macrozooplankton", fesom_var="Zoo3C",   fac=1/12.01), # obs ug/L (=mg C/m3) -> FESOM mmol C/m3
+    list(dataset="de_boyer_montegut_etal_2023", varname="mld_dr003",   fesom_var="MLD3", fesom_fac=-1), # FESOM's MLD3 is negative-down, obs is positive-down
     list(dataset="glodap", varname="TCO2",        fesom_var="DIC"),
     list(dataset="glodap", varname="TAlk",        fesom_var="Alk"),
     list(dataset="glodap", varname="NO3",         fesom_var="DIN"),
@@ -125,16 +171,17 @@ pairs <- list(
     list(dataset="glodap", varname="oxygen",      fesom_var="O2"),
     list(dataset="glodap", varname="temperature", fesom_var="temp"),
     list(dataset="glodap", varname="salinity",    fesom_var="salt"),
-    list(dataset="gregor_and_fay_2021", varname="fgco2", fesom_var="CO2f"),
+    list(dataset="gregor_and_fay_2021", varname="fgco2", fesom_var="CO2f", fac=-1000/365), # obs molC/m2/yr (>0 into atm) -> FESOM mmolC/m2/d (>0 into ocean): unit conversion + sign flip
     list(dataset="gregor_and_fay_2021", varname="pCO2s", fesom_var="pCO2s"),
-    list(dataset="huang_etal_2022",     varname="dFe",   fesom_var="DFe"),
+    list(dataset="huang_etal_2022",     varname="dFe",   fesom_var="DFe", fac=1e-3), # obs nmol/L -> FESOM mmol/m3
     list(dataset="keppler_etal_2020",   varname="DIC",   fesom_var="DIC"),
     list(dataset="lewis_etal_2022", varname="chlor_a", file_match="^A_", fesom_var="Chl"),
     list(dataset="lewis_etal_2022", varname="chlor_a", file_match="^S_", fesom_var="Chl"),
-    list(dataset="cmems", varname="ARC_009_124_CHL", fesom_var="Chl"),
+    # list(dataset="cmems", varname="ARC_009_124_CHL", fesom_var="Chl"), # disabled: curvilinear grid has
+    # no cell bounds usable by `cdo remapcon` -- FESOM's remap onto it comes back entirely missing
     list(dataset="cmems", varname="GLO_009_104_CHL", fesom_var="Chl"),
     list(dataset="cmems", varname="GLO_009_108_CHL", fesom_var="Chl"),
-    list(dataset="cmems", varname="GLO_009_104_PP",  fesom_var="NPP"),
+    list(dataset="cmems", varname="GLO_009_104_PP",  fesom_var="NPP", fac=1/12.01), # obs mg C/m2/d -> FESOM mmol C/m2/d
     list(dataset="steele_etal_2001", varname="temp", fesom_var="temp"),
     list(dataset="steele_etal_2001", varname="salt", fesom_var="salt"),
     list(dataset="woa", varname="temp", fesom_var="temp"),
@@ -143,6 +190,15 @@ pairs <- list(
     list(dataset="woa", varname="DSi",  fesom_var="DSi"),
     list(dataset="woa", varname="O2",   fesom_var="O2")
 )
+fac_of <- function(p) if (is.null(p$fac)) 1 else p$fac
+fesom_fac_of <- function(p) if (is.null(p$fesom_fac)) 1 else p$fesom_fac # like `fac`, but applied to the model side
+
+# same `datas`/other fields as `job`, but `anom`=T and tagged "_anom" -- see plot.r's header for `anom`
+anom_job_of <- function(job) {
+    job$anom <- TRUE
+    job$fout <- sub("\\.png$", "_anom.png", job$fout)
+    job
+}
 
 plots <- list()
 for (p in pairs) {
@@ -162,8 +218,11 @@ for (p in pairs) {
                 model_f <- remap_fesom_map(p$fesom_var, f)
                 if (!is.null(model_f)) {
                     fout <- file.path(pathplot, "comparison", p$dataset, "timmean", p$varname, paste0(label, "_vs_", p$fesom_var, ".png"))
-                    plots[[length(plots)+1]] <- list(datas=list(list(fin=f, label=paste(p$dataset, p$varname)),
-                                                                 list(fin=model_f, label=p$fesom_var)), fout=fout)
+                    job <- list(datas=list(list(fin=f, label=paste(p$dataset, p$varname), fac=fac_of(p)),
+                                            list(fin=model_f, label=p$fesom_var, fac=fesom_fac_of(p))), fout=fout,
+                                zlab=map_zlab(p, model_f))
+                    plots[[length(plots)+1]] <- job
+                    plots[[length(plots)+1]] <- anom_job_of(job)
                 }
             } else if (ndims == 3) {
                 depth_i <- which(survive & !is.na(match(dd$names, known_depth_dimnames)))
@@ -183,9 +242,12 @@ for (p in pairs) {
                         if (is.null(model_f)) next
                         dtag <- paste0(dd$names[depth_i], round(dd$vals[[depth_i]][k]))
                         fout <- file.path(pathplot, "comparison", p$dataset, "timmean", p$varname, paste0(label, "_", dtag, "_vs_", p$fesom_var, ".png"))
-                        plots[[length(plots)+1]] <- list(datas=list(
-                            list(fin=f, label=paste(p$dataset, p$varname), index=setNames(list(k), dd$names[depth_i])),
-                            list(fin=model_f, label=p$fesom_var)), fout=fout)
+                        job <- list(datas=list(
+                            list(fin=f, label=paste(p$dataset, p$varname), index=setNames(list(k), dd$names[depth_i]), fac=fac_of(p)),
+                            list(fin=model_f, label=p$fesom_var, fac=fesom_fac_of(p))), fout=fout,
+                            zlab=map_zlab(p, model_f))
+                        plots[[length(plots)+1]] <- job
+                        plots[[length(plots)+1]] <- anom_job_of(job)
                     }
                     nc_close(nc)
                 }
@@ -201,6 +263,22 @@ for (p in pairs) {
         if (is.null(model_f)) next
         dfiles2 <- list.files(ddir2, pattern="\\.nc$", full.names=T)
         if (!is.null(p$file_match)) dfiles2 <- dfiles2[grepl(p$file_match, basename(dfiles2))]
+        if (length(dfiles2) == 0) next
+
+        # e.g. FESOM's "Chl" (DiaChl+PhyChl, 3D) paired with a surface-only obs product (cmems/
+        # lewis_etal_2022 chlor_a, 2D) -- model keeps a depth dim the data side never had; slice model
+        # to the surface (nearest depth to 0) once per `mode_name`, same convention as the map case above
+        data_dd <- nc_var_dims(dfiles2[1])
+        data_has_depth <- any(!is.na(match(data_dd$names[data_dd$lens > 1], known_depth_dimnames)))
+        model_dd <- nc_var_dims(model_f)
+        model_survive <- model_dd$lens > 1
+        model_depth_i <- which(model_survive & !is.na(match(model_dd$names, known_depth_dimnames)))
+        model_index <- NULL
+        if (!data_has_depth && length(model_depth_i) == 1) {
+            k <- nearest_idx(model_dd$vals[[model_depth_i]], 0)
+            model_index <- setNames(list(k), model_dd$names[model_depth_i])
+        }
+
         for (f in dfiles2) {
             ndims <- sum(nc_var_dims(f)$lens > 1)
             if (!(ndims %in% 1:2)) {
@@ -209,9 +287,16 @@ for (p in pairs) {
             }
             label <- tools::file_path_sans_ext(basename(f))
             fout <- file.path(pathplot, "comparison", p$dataset, mode_name, p$varname, paste0(label, "_vs_", p$fesom_var, ".png"))
-            job <- list(datas=list(list(fin=f, label=paste(p$dataset, p$varname)), list(fin=model_f, label=p$fesom_var)), fout=fout)
+            model_data <- list(fin=model_f, label=p$fesom_var)
+            if (!is.null(model_index)) model_data$index <- model_index
+            job <- list(datas=list(list(fin=f, label=paste(p$dataset, p$varname), fac=fac_of(p)), model_data), fout=fout)
             if (mode_name == "fldmean" && ndims == 1) job$mode <- "fldmean"
             plots[[length(plots)+1]] <- job
+            # anomaly (model - obs) panel: only for the seasonal-cycle variants, and only when both
+            # sides are still 2-dim (ndims==1 i.e. plain fldmean has no 2nd axis to interpolate against)
+            if (mode_name %in% c("zonmean_ymon", "fldmean_ymon") && ndims == 2) {
+                plots[[length(plots)+1]] <- anom_job_of(job)
+            }
         }
     }
 }

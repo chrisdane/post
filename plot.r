@@ -32,6 +32,8 @@
 #   plot_ma - [optional] also save a running-mean version ("_ma<nyrs>" before the extension); default: config `plot_ma`
 #   ma_opts - [optional] list(nyrs=, align=) for datasets without own `ma`; overrides config `ma_nyrs`
 #   zlim, nlevels, n, m - [optional] contour plots only; passed to image.plot.pre()/image.plot.nxm()
+#   anom    - [optional] contour plots (2 dims) only; if T, plot every pairwise difference (data_j - data_i,
+#             interpolated onto data_i's grid, for all i < j) instead of the datasets themselves
 
 message("\n****************** plot.r start ******************")
 
@@ -114,6 +116,31 @@ resolve_fin <- function(fin, ploti, datai) {
     if (length(hits) > 1) stop("plot ", ploti, ", data ", datai, ": `fin` = \"", fin, "\" found more than once under `pathpost`:\n", paste(hits, collapse="\n"))
     hits
 } # resolve_fin
+
+# bilinear-style interpolation of a regular-grid `z_src` (dim length(x_src) x length(y_src)) onto
+# `x_tgt`/`y_tgt`, as 2 separable 1-dim passes (`approx()` along x, then along y); used by `anom` (see
+# header) to difference 2 datasets that are on different, but each individually regular, grids (e.g.
+# obs vs FESOM's own zonmean/fldmean lat or depth bins). NA outside `x_src`/`y_src`'s range (no extrapolation).
+# exception: a 12-step POSIXct x (a "_ymon" monthly climatology) is matched by *position*, not value --
+# cdo's `ymonmean` gives each file its own, mutually non-comparable absolute reference date per month
+# (see `month_ticks` below), so value-based interpolation would wrongly see disjoint ranges and return all-NA.
+interp_grid <- function(x_src, y_src, z_src, x_tgt, y_tgt) {
+    if (inherits(x_src, "POSIXct") && inherits(x_tgt, "POSIXct") && length(x_src) == length(x_tgt)) {
+        tmp <- z_src
+    } else {
+        tmp <- matrix(NA_real_, nrow=length(x_tgt), ncol=length(y_src))
+        for (j in seq_along(y_src)) {
+            v <- z_src[, j]
+            if (sum(!is.na(v)) >= 2) tmp[, j] <- approx(x_src, v, xout=x_tgt)$y # else: leave as NA (e.g. an all-masked row)
+        }
+    }
+    out <- matrix(NA_real_, nrow=length(x_tgt), ncol=length(y_tgt))
+    for (i in seq_len(nrow(tmp))) {
+        v <- tmp[i, ]
+        if (sum(!is.na(v)) >= 2) out[i, ] <- approx(y_src, v, xout=y_tgt)$y
+    }
+    out
+} # interp_grid
 
 # read 1 dataset; `plot_from`/`plot_to` (may be NULL) overridden by those of `d`
 read_data <- function(d, ploti, datai, plot_from=NULL, plot_to=NULL) {
@@ -232,13 +259,21 @@ read_data <- function(d, ploti, datai, plot_from=NULL, plot_to=NULL) {
 } # read_data
 
 axis_label <- function(dimname, dimunits) if (nzchar(dimunits)) paste0(dimname, " [", dimunits, "]") else dimname
-data_label <- function(d) if (nzchar(d$units)) paste0(d$label, " [", d$units, "]") else d$label
+data_label <- function(d) {
+    units <- sub("^\\[(.*)\\]$", "\\1", d$units) # several FESOM/REcoM vars store units already bracketed, e.g. "[mmol/m3]"
+    if (nzchar(units)) paste0(d$label, " [", units, "]") else d$label
+}
 
-# time dim with "<unit> since <origin>" (s/min/h/d) or cdo's "day as %Y%m%d" units --> POSIXct; else unchanged
+# time dim with "<unit> since <origin>" (s/min/h/d), cdo's "day as %Y%m%d" or "month as %Y%m.%f" units
+# --> POSIXct; else unchanged
 maybe_time_axis <- function(dimname, vals, units) {
     if (is.na(match(dimname, known_time_dimnames)) || !nzchar(units)) return(vals)
     if (grepl("^\\s*day as %Y%m%d", units)) {
         return(as.POSIXct(strptime(sprintf("%08d", as.integer(floor(vals))), "%Y%m%d", tz="UTC")) + (vals %% 1)*86400)
+    }
+    if (grepl("^\\s*month as %Y%m", units)) { # value = year*100 + month (+ a %f fraction-of-month, ignored)
+        yyyymm <- as.integer(floor(vals))
+        return(as.POSIXct(strptime(sprintf("%06d01", yyyymm), "%Y%m%d", tz="UTC")))
     }
     m <- regmatches(units, regexec("^\\s*([[:alpha:]]+)\\s+since\\s+(.+?)\\s*$", units))[[1]]
     if (length(m) != 3) return(vals)
@@ -418,8 +453,11 @@ for (ploti in seq_along(plots)) {
 
         if (mode == "pairwise" || mode == "fldmean" || (mode == "auto" && all(ndims == 1))) {
 
-            # lengths may differ, the dim must be the same
-            if (mode %in% c("auto", "fldmean") && ndata > 1) {
+            # lengths may differ, the dim must be the same -- except for `mode` = "fldmean", where the
+            # dim-validation above already confirms every dataset's remaining dim is depth-like (via
+            # `known_depth_dimnames`); the exact dim *name* legitimately differs across datasets there
+            # (e.g. "DEPTH" vs "nz"), that is the entire point of recognizing multiple aliases
+            if (mode == "auto" && ndata > 1) {
                 shared_dim <- datas[[1]]$dims[1]
                 for (datai in 2:ndata) {
                     if (datas[[datai]]$dims[1] != shared_dim) {
@@ -580,7 +618,8 @@ for (ploti in seq_along(plots)) {
                 ord <- if (length(time_ind) == 1) c(time_ind, setdiff(1:2, time_ind))
                        else if (length(depth_ind) == 1) c(setdiff(1:2, depth_ind), depth_ind)
                        else 1:2
-                if (length(time_ind) != 1 && length(depth_ind) == 1) is_depth_y <- T
+                if (length(depth_ind) == 1 && ord[2] == depth_ind) is_depth_y <- T # depth ended up on y (e.g.
+                    # fldmean_ymon's time-on-x, depth-on-y -- not just the no-time-dim case below)
                 # convert a recognized time dim to POSIXct (image.plot.nxm formats it as calendar dates/
                 # years via `axis.POSIXct` automatically); raw "<n> seconds/days since ..." values
                 # otherwise, as for the 1-dim line-plot path above
@@ -590,9 +629,36 @@ for (ploti in seq_along(plots)) {
                 dims_ordered[[datai]] <- list(names=dm$dims[ord], units=dm$dimunits[ord])
             }
             znames <- sapply(datas, "[[", "label")
-            zlim <- job_get(job, "zlim", range(z, finite=T, na.rm=T))
+
+            if (job_get(job, "anom", F)) {
+                if (ndata < 2) stop("plot ", ploti, ": `anom`=T needs >= 2 datasets, got ", ndata)
+                combi <- combn(ndata, 2)
+                anom_x <- vector("list", ncol(combi)); anom_y <- anom_x; anom_z <- anom_x
+                anom_names <- character(ncol(combi)); anom_dims_ordered <- vector("list", ncol(combi))
+                for (pi in seq_len(ncol(combi))) {
+                    i <- combi[1, pi]; j <- combi[2, pi] # i: reference grid; j: interpolated onto i
+                    anom_x[[pi]] <- x[[i]]; anom_y[[pi]] <- y[[i]]
+                    anom_z[[pi]] <- interp_grid(x[[j]], y[[j]], z[[j]], x[[i]], y[[i]]) - z[[i]]
+                    anom_names[pi] <- paste0(znames[j], " - ", znames[i])
+                    anom_dims_ordered[[pi]] <- dims_ordered[[i]]
+                }
+                x <- anom_x; y <- anom_y; z <- anom_z; znames <- anom_names; dims_ordered <- anom_dims_ordered
+                ndata <- length(x)
+                message("--> `anom`=T --> ", ndata, " pairwise difference(s): ", paste(znames, collapse=", "))
+            }
+            # default: 10th/90th percentile, not the full min/max -- a handful of near-zero outliers
+            # (e.g. obs/model noise at depth) can otherwise stretch `zlim` just enough to cross 0 and
+            # spuriously trigger image.plot.pre()'s auto diverging ("anomaly") colorbar for an otherwise
+            # all-positive field, and in general compresses the color scale's useful contrast; `anom`=T
+            # plots are the difference itself, so keep their full range -- clipping it would hide exactly
+            # the (potentially large) bias regions an anomaly plot exists to show
+            zlim <- job_get(job, "zlim", if (job_get(job, "anom", F)) range(z, finite=T, na.rm=T)
+                                          else quantile(unlist(z), probs=c(0.1, 0.9), na.rm=T))
             nlevels <- job_get(job, "nlevels", 11)
-            zlab <- job_get(job, "zlab", data_label(datas[[1]]))
+            # default to the *last* dataset's label (by convention the model, e.g. "salt", vs. the 1st/obs
+            # dataset's dataset-prefixed label, e.g. "woa salt") -- a comparison plot's colorbar should read
+            # as the physical variable being compared, not one side's own dataset name
+            zlab <- job_get(job, "zlab", data_label(datas[[length(datas)]]))
 
             message("--> contour plot (", ndata, " panel(s), zlim = [", round(zlim[1], 3), ", ", round(zlim[2], 3), "]) ...")
             ip <- image.plot.pre(zlim=zlim, nlevels=nlevels)

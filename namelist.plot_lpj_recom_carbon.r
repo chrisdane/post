@@ -22,7 +22,7 @@ experiments <- list(
     #list(experiment="pi_noxios", from=1850, to=1858)
     #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2059, plot_to=1880)
     #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", from=2230, to=2389) # from: 2230
-    list(experiment="AE3CC_pi", from=1850, to=2609)
+    list(experiment="AE3CC_pi", from=1850, to=2649)
 )
 
 #####################################################################################################

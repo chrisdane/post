@@ -22,7 +22,7 @@ experiments <- list(
     #list(experiment="pi_noxios", from=1850, to=1858, col="black")
     #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2229, col="gray")
     #,list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", from=2230, to=2389, col="black") # from: 2230
-    list(experiment="AE3CC_pi", from=1850, to=2609, col="black")
+    list(experiment="AE3CC_pi", from=1850, to=2649, col="black")
 )
 
 # output variable of namelist.post_lpj_carbon.r and its <dtin> in the post.r file name
@@ -130,8 +130,10 @@ if (T) { # per experiment: all carbon pool components (sum = cLand_monthly)
     }
 }
 
-if (F) { # per experiment: main land carbon pools (sum = cLand_monthly)
-    comps <- c("cVeg_monthly", "cLitter_monthly", "cSoil_monthly", "cProduct_monthly", "cLand_monthly")
+if (T) { # per experiment: main land carbon pools (sum = cLand_monthly)
+    comps <- c(#"cVeg_monthly", # cVeg_monthly some missing due to lpj2nc
+               "cVeg_yearly",
+               "cLitter_monthly", "cSoil_monthly", "cProduct_monthly", "cLand_monthly")
     for (exp in experiments) {
         plots[[length(plots)+1]] <- list(
             datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=if (comps[i] == "cLand_monthly") "black" else comp_cols[i+1], lwd=if (comps[i] == "cLand_monthly") 2 else 1)),
@@ -143,11 +145,13 @@ if (F) { # per experiment: main land carbon pools (sum = cLand_monthly)
     }
 }
 
-if (F) { # per experiment: cVeg per organ (sum = cVeg_monthly, incl. the npp not yet allocated to the organs)
-    comps <- c("cLeaf_monthly", "cStem_monthly", "cRoot_monthly", "cOther_monthly", "cVeg_monthly")
+if (T) { # per experiment: cVeg per organ (sum = cVeg_monthly, incl. the npp not yet allocated to the organs)
+    comps <- c("cLeaf_monthly", "cStem_monthly", "cRoot_monthly", "cOther_monthly",
+               #"cVeg_monthly" cVeg_monthly some missing due to lpj2nc
+               "cVeg_yearly")
     for (exp in experiments) {
         plots[[length(plots)+1]] <- list(
-            datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=comp_cols[i], lwd=if (comps[i] == "cVeg_monthly") 2 else 1)),
+            datas=lapply(seq_along(comps), function(i) list(fin=fin(comps[i], "year", exp), label=comps[i], col=comp_cols[i], lwd=if (any(comps[i] == c("cVeg_monthly", "cVeg_yearly"))) 2 else 1)),
             ylab="cVeg [PgC]",
             plot_ma=T,
             #fout=paste0(pathplot, "/", setup, "/fldint/cbudget/cveg_organs_fldint_", setup, "_lpj_guess_", exp$experiment, "_<plot_from>-<plot_to>.", c("png", "pdf"))

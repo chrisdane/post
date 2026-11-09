@@ -75,7 +75,10 @@ if (F) { # levante
 } else if (T) { # albedo
     experiments <- list(
         #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.0-cc/AWI-ESM3-CC-LR-CMIP7-Spinup/outdata/lpj_guess") # , from=2060)
-        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/lpj_guess", from=2600, to=2609) # from: 2230; 2230-2599 already post-processed
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/lpj_guess", from=2230, to=2599), # re-added: the previously merged AE3CC_pi_..._1850-2599/2609 files (the only record of this range) were cleaned up assuming a raw chunk still existed -- it didn't, so this regenerates it from the still-present raw model output
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/lpj_guess", from=2600, to=2609),
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/lpj_guess", from=2610, to=2619), # merge_chunks.r merges this with the 2600-2609 chunk above
+        list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", pathin="/albedo/work/projects/p_awiesm3_cmip7/lahajd001/runtime/awiesm3-v3.5.1-cc/AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230/outdata/lpj_guess", from=2620, to=2649) # new years, matching namelist.post_recom_carbon.r; merge_chunks.r merges this with the existing 1850-2619 merge above
     )
     lpj_remap_fpattern <- "remapcon_r360x180"
     flandarea <- "/albedo/work/user/cdanek/mesh/lpj/TCO95/landarea_remapcon_r360x180_destarea.nc"

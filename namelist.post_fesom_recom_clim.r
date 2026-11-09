@@ -2,7 +2,7 @@
 
 # Climatologies (timmean), seasonal cycles (ymonmean) and their zonal means (zonmean, after timmean and
 # after ymonmean) of FESOM/REcoM variables that have a counterpart observational data product, for later
-# comparison with namelist.post_data_fesom_recom_clim.r's output (run separately; comparison itself is not
+# comparison with namelist.post_data_oce.r's output (run separately; comparison itself is not
 # done here). Variable choice/counterparts oriented on py_f2recom's eval conventions
 # (github.com/RECOM-Regulated-Ecosystem-Model/py_f2recom, see esp. its `develop` branch's
 # GlobalAssessment/*_Comparison_*.ipynb notebooks).
@@ -73,7 +73,7 @@ for (x in vars) {
     jobs[[length(jobs)+1]] <- c(base, list(mode="zonmean", mode_name="zonmean",      mode_args="zonal_1", cdo_pre="-timmean"))
     jobs[[length(jobs)+1]] <- c(base, list(mode="zonmean", mode_name="zonmean_ymon", mode_args="zonal_1", cdo_pre="-ymonmean"))
     if (x$is3d) { # `fldmean` of 3D data -> a vertical profile (output length = ndepth); matches the data
-                  # side's `fldmean`/`fldmean_ymon` (namelist.post_data_fesom_recom_clim.r) for direct
+                  # side's `fldmean`/`fldmean_ymon` (namelist.post_data_oce.r) for direct
                   # model-obs profile comparison -- use *every* available depth, not just `level_str_3d`'s
                   # `depths_want`-nearest subset (no reason to throw away vertical resolution in a profile)
         base_alldepth <- c(base[setdiff(names(base), "level")], list(level=""))

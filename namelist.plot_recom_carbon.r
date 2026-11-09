@@ -22,7 +22,7 @@ experiments <- list(
     #list(experiment="pi_noxios", from=1850, to=1858, col="black")
     #list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup", from=1850, to=2229, col="black")
     #,list(experiment="AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230", from=2230, to=2389, col="black") # from: 2230
-    list(experiment="AE3CC_pi", from=1850, to=2619, col="black") # continues from 2230 (v3.5.1-cc) where the experiment above (v3.5.0-cc) stops at 2339 -- both overlaid 2230-2339 since they're different model versions, not the same data
+    list(experiment="AE3CC_pi", from=1850, to=2649, col="black") # continues from 2230 (v3.5.1-cc) where the experiment above (v3.5.0-cc) stops at 2339 -- both overlaid 2230-2339 since they're different model versions, not the same data
 )
 
 # all annual means of the monthly output
@@ -130,6 +130,26 @@ if (T) { # per experiment: carbon budget: d(cOcean)/dt = CO2f + residual (PgC/yr
             ),
             ylab="flux [PgC/yr] (>0: into ocean)",
             fout=fout("cocean_budget", exp)
+        )
+    }
+}
+
+if (T) { # DIC/Alk vertical profile (`mode` = "fldmean"): reuses namelist.post_fesom_recom_clim.r's
+          # climatology output (single experiment/year-range, not this namelist's multi-experiment `fin()`)
+    clim_experiment <- "AWI-ESM3-CC-LR-CMIP7-Spinup_v351_from2230"
+    clim_from <- 2510; clim_to <- 2609
+    fin_fesom_clim <- function(var, mode_name) {
+        pattern <- file.path(pathpost, setup, mode_name, var,
+                              paste0(var, "_mon_", mode_name, "_*", setup, "_recom_", clim_experiment, "_r1i1p1f1_gn_", clim_from, "-", clim_to, ".nc"))
+        hits <- Sys.glob(pattern)
+        if (length(hits) != 1) stop("fin_fesom_clim(\"", var, "\", \"", mode_name, "\"): expected 1 match for \"", pattern, "\", got ",
+                                     length(hits), if (length(hits) > 0) paste0(": ", paste(hits, collapse=", ")) else "")
+        hits
+    }
+    for (v in c("DIC", "Alk")) {
+        plots[[length(plots)+1]] <- list(
+            mode="fldmean", datas=list(list(fin=fin_fesom_clim(v, "fldmean"), label=v)),
+            fout=paste0(pathplot, "/", setup, "/fldmean/", v, "/", v, "_fldmean_", setup, "_recom_", clim_experiment, "_", clim_from, "-", clim_to, ".png")
         )
     }
 }
