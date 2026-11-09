@@ -38,36 +38,30 @@ if (F) { # awiesm3 raw fesom/recom
     ))
 }
 
-if (F) { # awiesm1 raw fesom/recom
+if (T) { # awiesm1 raw fesom/recom
     jobs <- c(jobs, expand_jobs(
         common=list(
             setup   = "AWI-ESM-1-REcoM",
-            model   = "fesom",
-            #model   = "recom",
-            fpattern   = "siarean_fesom_*<year>0101.nc", mode="select",
+            #model   = "fesom",
+            model   = "recom",
+            #fpattern   = "siarean_fesom_*<year>0101.nc", mode="select",
             #fpattern   = "aCO2_fesom_*<year>0101.nc", mode="select",
             #fpattern   = "pCO2s_fesom_*<year>0101.nc", mode="fldmean",
+            fpattern   = "CO2f_fesom_*<year>0101.nc", mode="fldint",
             #cdo_pre    = "-shifttime,-1s"
+            cdo_pre    = "-setgrid,/pool/data/AWICM/FESOM1/MESHES/core/griddes.nc",
             #cdo_pre    = "-shifttime,-1s -setgrid,/pool/data/AWICM/FESOM1/MESHES/core/griddes.nc",
             #cdo_post    = "-setgrid,/pool/data/AWICM/FESOM1/MESHES/core/griddes.nc",
             #cdo_post   = "-remapycon,r360x180 -setgrid,/pool/data/AWICM/FESOM1/MESHES/core/griddes.nc",
             pathout = "/work/ab1095/a270073/post"
         ),
         settings=list(
-            list(
-                experiment = "esm-ssp126",
-                pathin     = "/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-ssp126/outdata/{fesom,recom}"
-            )
-            ,list(
-                experiment = "esm-ssp534-over2",
-                pathin     = "/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-ssp534os2/outdata/{fesom,recom}"
-            )
-            ,list(
-                experiment = "esm-ssp585",
-                pathin     = "/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-ssp585/outdata/{fesom,recom}"
-                ,from  = 2015
-                ,to    = 2039
-            )
+            #list(experiment="piControl_LUtrans1850", pathin="/work/ba1103/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/piControl_LUtrans1850/outdata/recom")
+            #list(experiment="esm-piControl", pathin="/work/ba1066/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-piControl/outdata/recom")
+            list(experiment="esm-piControl_wout_talk_rest", pathin="/work/ab1095/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-piControl_wout_talk_rest/outdata/recom", to=3207)
+            #,list(experiment="esm-ssp126", pathin="/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-ssp126/outdata/{fesom,recom}")
+            #,list(experiment="esm-ssp534-over2", pathin="/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-ssp534os2/outdata/{fesom,recom}")
+            #,list(experiment="esm-ssp585", pathin="/work/{ab1095,ba1103,ba1066}/a270073/out/awicm-1.0-recom/awi-esm-1-1-lr_kh800/esm-ssp585/outdata/{fesom,recom}", from=2015, to=2039)
         )
     ))
 }

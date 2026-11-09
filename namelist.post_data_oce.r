@@ -301,9 +301,11 @@ if (F) {
     # the raw data -- `-setgrid,<that file>` fixes it the same way as lewis' create_genbounds.r output.
     arc_griddes <- file.path(cmems_root, "OCEANCOLOUR_ARC_BGC_L4_MY_009_124/cmems_obs-oc_arc_bgc-plankton_my_l4-multi-4km_P1M",
                               "griddes_cmems_obs-oc_arc_bgc-plankton_my_l4-multi-4km_P1M.txt")
+    Sys.setenv(REMAP_AREA_MIN="0.5") # remapycon: a target cell needs at least half of its area with data; matters with sea ice, clouds and polar night
     cmems_vars <- list(
         list(name="ARC_009_124_CHL",   sub="OCEANCOLOUR_ARC_BGC_L4_MY_009_124/cmems_obs-oc_arc_bgc-plankton_my_l4-multi-4km_P1M", var="CHL",
-             pre=paste0("-setgrid,", arc_griddes)),
+             pre=paste0("-sellonlatbox,-180,180,60,90 -remapycon,r360x180 -setgrid,", arc_griddes)), # regular 1 deg grid, as for the other datasets;
+                                                                     # see `REMAP_AREA_MIN` above
         list(name="GLO_009_104_CHL",   sub="OCEANCOLOUR_GLO_BGC_L4_MY_009_104/cmems_obs-oc_glo_bgc-plankton_my_l4-multi-4km_P1M", var="CHL"),
         list(name="GLO_009_104_DIATO", sub="OCEANCOLOUR_GLO_BGC_L4_MY_009_104/cmems_obs-oc_glo_bgc-plankton_my_l4-multi-4km_P1M", var="DIATO"),
         list(name="GLO_009_104_MICRO", sub="OCEANCOLOUR_GLO_BGC_L4_MY_009_104/cmems_obs-oc_glo_bgc-plankton_my_l4-multi-4km_P1M", var="MICRO"),

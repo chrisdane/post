@@ -34,6 +34,15 @@
 #   zlim, nlevels, n, m - [optional] contour plots only; passed to image.plot.pre()/image.plot.nxm()
 #   anom    - [optional] contour plots (2 dims) only; if T, plot every pairwise difference (data_j - data_i,
 #             interpolated onto data_i's grid, for all i < j) instead of the datasets themselves
+#   zlim_quantiles - [optional] contour plots only; e.g. c(0.1, 0.9): most colors between these quantiles of all panels,
+#             with the min and max of the data at the ends of the colorbar
+#   anom_colorbar - [optional] contour plots only; F: sequential colors (Spectral) also if zlim includes 0; default: automatic
+#   anomaly - [optional] contour plots with 2 datasets only; if T: also save "data 2 minus data 1" ("_anom" before the extension);
+#             data 2 is interpolated bilinearly to the axes of data 1 (`fields::interp.surface.grid`), NA if any of the 4 surrounding values is NA; no interpolation if the axes are identical; skipped if the units differ
+#   anomaly_zlim - [optional] default: symmetric around 0, from the 99th percentile of the absolute anomaly
+#   anomaly_zlab - [optional] colorbar label of the anomaly plot; default: "anomaly [<units of data 1>]"
+#   same_units - [optional] if T: the units of both datasets are the same after `fac`, also if the `units` attributes differ
+# units in labels are drawn with sub-/superscripts, e.g. "mmolC/m2/d" --> mmolC m^-2 d^-1 (see `fmt_label()`)
 
 message("\n****************** plot.r start ******************")
 
@@ -81,6 +90,7 @@ known_time_dimnames <- c("time", "Time", "TIME", "mon")
 # buitenhuis_etal_2013's upper-case "DEPTH"); depth goes on the inverted y axis of contour plots
 # (`mode` = "auto", 2 dims, no time) and is the sole axis of a `mode` = "profile" line plot (1 dim)
 known_depth_dimnames <- c("depth", "Depth", "DEPTH", "depth_surface", "nz", "lev", "level", "Level", "LEVEL")
+known_lat_dimnames <- c("lat", "Lat", "LAT", "latitude", "Latitude", "LATITUDE")
 
 # "a/{x,y}/b" --> c("a/x/b", "a/y/b")
 brace_expand <- function(x) {
@@ -257,6 +267,60 @@ read_data <- function(d, ploti, datai, plot_from=NULL, plot_to=NULL) {
     list(data=arr, dims=vardims, dimvals=dimvals_out, dimunits=dimunits[vardims], varname=varname, units=units, label=label,
          year_from=year_from, year_to=year_to)
 } # read_data
+
+# "mmolC/m2/d", "kg m-2 s-1", "micro-mol kg-1", ... --> data.frame(base, exp); NULL if dimensionless
+unit_tokens <- function(u) {
+    u <- trimws(u)
+    if (!nzchar(u) || u == "1") return(NULL)
+    aliases <- c("micro-mol"="umol", "micromol"="umol", "milligram"="mg", "milligrams"="mg", "degrees_celsius"="degC", "degree_celsius"="degC",
+                 "degree_C"="degC", "degrees_C"="degC", "celsius"="degC", "Celsius"="degC", "meter"="m", "meters"="m", "metre"="m", "metres"="m")
+    parts <- strsplit(u, "/", fixed=T)[[1]]
+    out <- data.frame(base=character(), exp=integer())
+    for (pi in seq_along(parts)) {
+        for (tok in strsplit(trimws(parts[pi]), "[[:space:]*]+")[[1]]) {
+            if (tok %in% names(aliases)) tok <- aliases[[tok]]
+            m <- regmatches(tok, regexec("^([[:alpha:]]+)\\^?(-?[0-9]+)$", tok))[[1]]
+            is_exp <- length(m) == 3 && !(m[2] %in% c("CO", "O", "N", "H", "NO", "PO")) # CO2 is no exponent
+            base <- if (is_exp) m[2] else tok
+            exp <- if (is_exp) as.integer(m[3]) else 1L
+            out[nrow(out) + 1,] <- list(base, if (pi > 1) -exp else exp)
+        }
+    }
+    out
+} # unit_tokens
+
+# plotmath string of units
+unit_math <- function(u) {
+    tok <- unit_tokens(u)
+    if (is.null(tok)) return(NULL)
+    terms <- mapply(function(b, e) {
+        if (grepl("^(CO|O|N|H|NO|PO)[0-9]+$", b)) return(sub("^([[:alpha:]]+)([0-9]+)$", "\\1[\\2]", b))
+        b <- if (b == "degC") "\u00b0C" else if (b %in% c("umol", "uatm", "um", "ug")) paste0("\u00b5", substring(b, 2)) else b
+        q <- paste0("\"", gsub("\"", "\\\\\"", b), "\"")
+        if (e == 1) q else paste0(q, "^{", e, "}")
+    }, tok$base, tok$exp, USE.NAMES=F)
+    paste(terms, collapse="~")
+} # unit_math
+
+# "flux [PgC/yr] (>0: into ocean)" --> expression with sub-/superscripts in the units; as is if not possible
+fmt_label <- function(x) {
+    if (!is.character(x) || length(x) != 1) return(x)
+    m <- regmatches(x, regexec("^(.*)\\[([^]]*)\\](.*)$", x))[[1]]
+    if (length(m) != 4) return(x)
+    tryCatch({
+        q <- function(s) paste0("\"", gsub("\"", "\\\\\"", gsub("\\", "\\\\", s, fixed=T)), "\"")
+        um <- unit_math(m[3])
+        if (is.null(um)) return(x)
+        parse(text=paste0("paste(", q(paste0(m[2], "[")), ", ", um, ", ", q(paste0("]", m[4])), ")"))
+    }, error=function(e) x)
+} # fmt_label
+
+# same units after normalizing the spelling
+same_units <- function(u1, u2) {
+    t1 <- unit_tokens(u1); t2 <- unit_tokens(u2)
+    if (is.null(t1) || is.null(t2)) return(is.null(t1) && is.null(t2))
+    identical(sort(paste(t1$base, t1$exp)), sort(paste(t2$base, t2$exp)))
+} # same_units
 
 axis_label <- function(dimname, dimunits) if (nzchar(dimunits)) paste0(dimname, " [", dimunits, "]") else dimname
 data_label <- function(d) {
@@ -459,8 +523,11 @@ for (ploti in seq_along(plots)) {
             # (e.g. "DEPTH" vs "nz"), that is the entire point of recognizing multiple aliases
             if (mode == "auto" && ndata > 1) {
                 shared_dim <- datas[[1]]$dims[1]
+                # the same kind of dim may have another name per data source, e.g. lat/latitude, depth/Depth
+                same_kind <- function(d1, d2) d1 == d2 || (d1 %in% known_depth_dimnames && d2 %in% known_depth_dimnames) ||
+                                              (d1 %in% known_lat_dimnames && d2 %in% known_lat_dimnames)
                 for (datai in 2:ndata) {
-                    if (datas[[datai]]$dims[1] != shared_dim) {
+                    if (!same_kind(datas[[datai]]$dims[1], shared_dim)) {
                         stop("plot ", ploti, ": data 1 and data ", datai, " don't share the same remaining dim (\"",
                              shared_dim, "\" vs \"", datas[[datai]]$dims[1], "\") -- cannot overlay on 1 line plot")
                     }
@@ -475,8 +542,8 @@ for (ploti in seq_along(plots)) {
                 set_ymar(range(y, finite=T))
                 graphics::plot(x, y, type="n", xlab="", ylab="", xaxt="n", yaxt="n")
                 axis(1, at=usr_at(1))
-                xtitle(data_label(datas[[1]]))
-                yaxis(usr_at(2), data_label(datas[[2]]))
+                xtitle(fmt_label(data_label(datas[[1]])))
+                yaxis(usr_at(2), fmt_label(data_label(datas[[2]])))
                 abline(h=0, v=0, col="gray", lwd=0.5)
                 lines(x, y, col=job_get(job_datas[[1]], "col", default_cols[1]), lwd=job_get(job_datas[[1]], "lwd", 1))
                 message("run `my_dev.off(", fout, ") ...")
@@ -489,8 +556,8 @@ for (ploti in seq_along(plots)) {
                 depth_range <- range(unlist(depth_list), finite=T)
                 set_ymar(depth_range)
                 graphics::plot(0, type="n", xlim=xr, ylim=rev(depth_range), xlab="", ylab="", xaxt="n", yaxt="n")
-                axis(1, at=usr_at(1)); xtitle(job_get(job, "ylab", data_label(datas[[1]])))
-                yaxis(pretty(par("usr")[4:3], n=10), axis_label(datas[[1]]$dims[1], datas[[1]]$dimunits[1]))
+                axis(1, at=usr_at(1)); xtitle(fmt_label(job_get(job, "ylab", data_label(datas[[1]]))))
+                yaxis(pretty(par("usr")[4:3], n=10), fmt_label(axis_label(datas[[1]]$dims[1], datas[[1]]$dimunits[1])))
                 abline(v=0, col="gray", lwd=0.5)
                 for (datai in seq_len(ndata)) {
                     dj <- job_datas[[datai]]
@@ -498,7 +565,7 @@ for (ploti in seq_along(plots)) {
                           lty=job_get(dj, "lty", 1), lwd=job_get(dj, "lwd", 1))
                 }
                 if (ndata > 1) {
-                    pos <- job_get(job, "legend_pos", "topright")
+                    pos <- job_get(job, "legend_pos", "bottomright") # profiles are mostly in the upper part
                     if (is.numeric(pos)) pos <- list(x=pos[1], y=pos[2])
                     do.call(legend, c(list(x=pos), list(legend=sapply(datas, "[[", "label"),
                              col=sapply(seq_len(ndata), function(i) job_get(job_datas[[i]], "col", default_cols[(i - 1) %% length(default_cols) + 1])),
@@ -522,9 +589,9 @@ for (ploti in seq_along(plots)) {
                         xtitle("year")
                     } else {
                         axis(1, at=usr_at(1))
-                        xtitle(axis_label(datas_draw[[1]]$dims[1], datas_draw[[1]]$dimunits[1]))
+                        xtitle(fmt_label(axis_label(datas_draw[[1]]$dims[1], datas_draw[[1]]$dimunits[1])))
                     }
-                    yaxis(usr_at(2), job_get(job, "ylab", data_label(datas_draw[[1]])))
+                    yaxis(usr_at(2), fmt_label(job_get(job, "ylab", data_label(datas_draw[[1]]))))
                     abline(h=0, col="gray", lwd=0.5)
                     for (datai in seq_len(ndata)) {
                         dj <- job_datas[[datai]]
@@ -610,7 +677,7 @@ for (ploti in seq_along(plots)) {
             # y axis (inverted: shallow at top), as for a zonal-mean section (lat on x, depth on y)
             x <- vector("list", ndata); y <- vector("list", ndata); z <- vector("list", ndata)
             dims_ordered <- vector("list", ndata)
-            is_depth_y <- F
+            is_depth_y <- is_month_x <- is_month_y <- F
             for (datai in seq_len(ndata)) {
                 dm <- datas[[datai]]
                 time_ind <- which(!is.na(match(dm$dims, known_time_dimnames)))
@@ -626,6 +693,17 @@ for (ploti in seq_along(plots)) {
                 x[[datai]] <- maybe_time_axis(dm$dims[ord[1]], dm$dimvals[[ord[1]]], dm$dimunits[ord[1]])
                 y[[datai]] <- maybe_time_axis(dm$dims[ord[2]], dm$dimvals[[ord[2]]], dm$dimunits[ord[2]])
                 z[[datai]] <- if (ord[1] == 1) dm$data else t(dm$data)
+                # a 12-step POSIXct axis is a monthly climatology (e.g. post.r's "..._ymon" modes): its dates have nothing
+                # to do with the plotted years. cdo's `ymonmean` assigns each month's *own* mean timestamp, which can be in
+                # different and non-chronological years per month, and obs and model are in different years, so that a common
+                # time axis squeezes each panel into a sliver --> 1, ..., 12, sorted, for all panels
+                if (inherits(x[[datai]], "POSIXct") && length(x[[datai]]) == 12) {
+                    mons <- as.POSIXlt(x[[datai]], tz="UTC")$mon + 1
+                    if (anyDuplicated(mons)) stop("plot ", ploti, ", data ", datai, ": 12 time steps but not 12 different months: ", paste(mons, collapse=", "))
+                    z[[datai]] <- z[[datai]][order(mons), , drop=F]
+                    x[[datai]] <- sort(mons)
+                    is_month_x <- T
+                }
                 dims_ordered[[datai]] <- list(names=dm$dims[ord], units=dm$dimunits[ord])
             }
             znames <- sapply(datas, "[[", "label")
@@ -652,34 +730,91 @@ for (ploti in seq_along(plots)) {
             # all-positive field, and in general compresses the color scale's useful contrast; `anom`=T
             # plots are the difference itself, so keep their full range -- clipping it would hide exactly
             # the (potentially large) bias regions an anomaly plot exists to show
-            zlim <- job_get(job, "zlim", if (job_get(job, "anom", F)) range(z, finite=T, na.rm=T)
+            # `zlim_quantiles` also needs the full range: its min and max are the ends of the colorbar
+            zlim <- job_get(job, "zlim", if (job_get(job, "anom", F) || !is.null(job_get(job, "zlim_quantiles"))) range(z, finite=T, na.rm=T)
                                           else quantile(unlist(z), probs=c(0.1, 0.9), na.rm=T))
             nlevels <- job_get(job, "nlevels", 11)
             # default to the *last* dataset's label (by convention the model, e.g. "salt", vs. the 1st/obs
             # dataset's dataset-prefixed label, e.g. "woa salt") -- a comparison plot's colorbar should read
             # as the physical variable being compared, not one side's own dataset name
-            zlab <- job_get(job, "zlab", data_label(datas[[length(datas)]]))
+            zlab <- fmt_label(job_get(job, "zlab", data_label(datas[[length(datas)]])))
 
             message("--> contour plot (", ndata, " panel(s), zlim = [", round(zlim[1], 3), ", ", round(zlim[2], 3), "]) ...")
-            ip <- image.plot.pre(zlim=zlim, nlevels=nlevels)
+            ip_args <- list(zlim=zlim, nlevels=nlevels, anom_colorbar=job_get(job, "anom_colorbar"))
+            zq <- job_get(job, "zlim_quantiles")
+            if (!is.null(zq)) {
+                zlevels <- as.numeric(stats::quantile(unlist(z), zq, na.rm=T))
+                if (zlevels[1] < zlevels[2]) {
+                    message("--> `zlim_quantiles` = ", paste(zq, collapse=", "), ": zoom colorbar to [", signif(zlevels[1], 3), ", ", signif(zlevels[2], 3), "]")
+                    ip_args <- c(ip_args, list(zlevels=zlevels, axis.zoom=T))
+                }
+            }
+            ip <- do.call(image.plot.pre, ip_args)
             open_dev(if (ndata > 1) contour_width else contour_width/1.3, contour_height)
-            axlab <- function(i) if (inherits(x[[1]], "POSIXct") && i == 1 || inherits(y[[1]], "POSIXct") && i == 2) "time"
-                                  else axis_label(dims_ordered[[1]]$names[i], dims_ordered[[1]]$units[i])
+            axlab <- function(i) if (is_month_x && i == 1) "month"
+                                  else if (inherits(x[[1]], "POSIXct") && i == 1 || inherits(y[[1]], "POSIXct") && i == 2) "time"
+                                  else fmt_label(axis_label(dims_ordered[[1]]$names[i], dims_ordered[[1]]$units[i]))
             args <- list(x=x, y=y, z=z, ip=ip, xlab=axlab(1), ylab=axlab(2),
                          zlab=zlab, znames_labels=znames, plot_type="active")
             if (is_depth_y) args$ylim <- job_get(job, "ylim", rev(range(unlist(y), finite=T)))
-            # a 12-step POSIXct axis is a monthly climatology (e.g. post.r's "..._ymon" modes) -- cdo's
-            # `ymonmean` assigns each month's *own* mean timestamp across the input period, which can land
-            # in different (and non-chronological) calendar years per month -- misleading as real dates
-            # (e.g. "2025-03" .. "2026-01" for a plain Jan-Dec climatology); label by month name instead
-            month_ticks <- function(v) if (inherits(v, "POSIXct") && length(v) == 12) list(at=v, labels=format(v, "%b")) else NULL
-            mt <- month_ticks(x[[1]]); if (!is.null(mt)) { args$x_at <- mt$at; args$x_labels <- mt$labels }
-            mt <- month_ticks(y[[1]]); if (!is.null(mt)) { args$y_at <- mt$at; args$y_labels <- mt$labels }
+            if (is_month_x) { args$x_at <- 1:12; args$x_labels <- month.abb }
+            # image.plot.nxm's default raster needs regular axes: it interpolates irregular ones to the same number of equidistant
+            # values, which e.g. squeezes all upper levels of a depth axis into 1 band and extends the NA --> polygons at the real values
+            is_irregular <- function(v) {
+                d <- as.vector(diff(as.numeric(v)))
+                length(d) > 1 && !isTRUE(all.equal(d, rep(d[1], length(d))))
+            }
+            if (any(sapply(c(x, y), is_irregular))) args$useRaster <- F
             job_n <- job_get(job, "n"); if (!is.null(job_n)) args$n <- job_n
             job_m <- job_get(job, "m"); if (!is.null(job_m)) args$m <- job_m
             do.call(image.plot.nxm, args)
             message("run `my_dev.off(", fout, ") ...")
             my_dev.off(fout)
+
+            # data 2 minus data 1, on the axes of data 1
+            if (isTRUE(job_get(job, "anomaly", F))) {
+                fout_anom <- sub("(\\.[^./]+)$", "_anom\\1", fout)
+                if (ndata != 2) {
+                    message("--> `anomaly` = T needs 2 datasets, not ", ndata, " --> skip")
+                } else if (!isTRUE(job_get(job, "same_units", F)) && !same_units(datas[[1]]$units, datas[[2]]$units)) {
+                    message("--> `anomaly` = T but units differ (\"", datas[[1]]$units, "\" vs \"", datas[[2]]$units,
+                            "\"): set `fac` and `same_units` = T --> skip \"", fout_anom, "\"")
+                } else if (file.exists(fout_anom) && !force) {
+                    message("--> \"", fout_anom, "\" already exists and `force` = F --> skip")
+                } else {
+                    srt <- function(v) order(as.numeric(v))
+                    ox1 <- srt(x[[1]]); oy1 <- srt(y[[1]]); ox2 <- srt(x[[2]]); oy2 <- srt(y[[2]])
+                    xa <- as.numeric(x[[1]])[ox1]; ya <- as.numeric(y[[1]])[oy1]
+                    x2 <- as.numeric(x[[2]])[ox2]; y2 <- as.numeric(y[[2]])[oy2]; z2 <- z[[2]][ox2, oy2, drop=F]
+                    # identical axes: no interpolation, since fields gives NA also for an NA neighbor with weight 0, which would grow the mask
+                    if (!isTRUE(all.equal(x2, xa)) || !isTRUE(all.equal(y2, ya))) z2 <- fields::interp.surface.grid(list(x=x2, y=y2, z=z2), list(x=xa, y=ya))$z
+                    anom <- z2 - z[[1]][ox1, oy1, drop=F]
+                    if (!any(is.finite(anom))) {
+                        message("--> no overlap of data 1 and data 2 --> skip \"", fout_anom, "\"")
+                    } else {
+                        zm <- as.numeric(stats::quantile(abs(anom), 0.99, na.rm=T))
+                        if (zm == 0) zm <- max(abs(anom), na.rm=T)
+                        if (zm == 0) zm <- 1
+                        zlim_a <- job_get(job, "anomaly_zlim", c(-zm, zm))
+                        anom[is.finite(anom)] <- pmax(pmin(anom[is.finite(anom)], zlim_a[2]), zlim_a[1]) # colors of the ends for outliers
+                        # time axis as given by the 1st dataset
+                        xa_plot <- if (inherits(x[[1]], "POSIXct")) x[[1]][ox1] else xa
+                        ya_plot <- if (inherits(y[[1]], "POSIXct")) y[[1]][oy1] else ya
+                        args_a <- args
+                        args_a$x <- list(xa_plot); args_a$y <- list(ya_plot); args_a$z <- list(anom)
+                        args_a$ip <- image.plot.pre(zlim=zlim_a, nlevels=nlevels, anom_colorbar=T)
+                        args_a$zlab <- fmt_label(job_get(job, "anomaly_zlab", if (nzchar(datas[[1]]$units)) paste0("anomaly [", datas[[1]]$units, "]") else "anomaly"))
+                        args_a$znames_labels <- paste0(datas[[2]]$label, " minus ", datas[[1]]$label)
+                        if (is_depth_y) args_a$ylim <- rev(range(ya, finite=T))
+                        message("--> anomaly plot \"", fout_anom, "\", zlim = [", signif(zlim_a[1], 3), ", ", signif(zlim_a[2], 3), "] ...")
+                        open_dev(contour_width/1.3, contour_height, path=fout_anom)
+                        do.call(image.plot.nxm, args_a)
+                        message("run `my_dev.off(", fout_anom, ") ...")
+                        my_dev.off(fout_anom)
+                        if (!file.exists(fout_anom)) stop("plot ", ploti, ": `fout_anom` = \"", fout_anom, "\" was not created")
+                    }
+                }
+            }
 
         } else {
             stop("plot ", ploti, ": unsupported/mismatched data shape(s) for `mode` = \"", mode, "\" -- ", ndata, " datasets with ",

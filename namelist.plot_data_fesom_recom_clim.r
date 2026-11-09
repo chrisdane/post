@@ -10,12 +10,13 @@
 #   comparable/plottable the way a regular lon-lat grid is. 1 map per depth in `depths_want` for a 3D
 #   variable (nearest-matched independently on each side, as elsewhere in this project), skipping an
 #   all-missing depth on the obs side.
-# - 1-dim reductions (`zonmean` of a 2D variable; `fldmean` of a 3D one, `mode` = "fldmean"): obs+model
-#   overlaid on 1 line/profile plot.
+# - 1-dim reductions (`zonmean` of a 2D variable; `fldmean` of a 3D one, `mode` = "fldmean"): all obs of the
+#   model variable + model overlaid on 1 line/profile plot.
 # - 2-dim reductions (`zonmean` of a 3D variable: lat-depth section; `zonmean_ymon` of a 2D one:
 #   lat-month; `fldmean_ymon` of a 3D one: depth-month): obs left panel, model right panel -- no remap
 #   needed here, both sides are already reduced to the same kind of axes (lat/depth/month bins).
 # - `zonmean_ymon` of a 3D variable (3 remaining dims: lat, depth, month) is skipped (plot.r draws 1 or 2).
+# - all 2-dim plots also get an anomaly plot "model minus data" ("_anom"; plot.r's `anomaly`), with the data in the units of the model (`fac` of `pairs`).
 #
 # Datasets/variables with no established FESOM/REcoM counterpart are left out of `pairs` entirely (not
 # silently skipped at plot time): nsidc (scalar hemispheric time series, not comparable to a_ice's
@@ -81,7 +82,7 @@ var_units <- function(f, varname) {
     if (att$hasatt) att$value else ""
 }
 map_zlab <- function(p, model_f) {
-    units <- var_units(model_f, p$fesom_var)
+    units <- var_units(model_f, nc_var_dims(model_f)$varname)
     units <- sub("^\\[(.*)\\]$", "\\1", units) # some FESOM/REcoM vars store units already bracketed, e.g. "[mmol/m3]"
     if (nzchar(units)) paste0(p$fesom_var, " [", units, "]") else p$fesom_var
 }
@@ -156,6 +157,16 @@ remap_fesom_map <- function(var, target_f, depth_want=NULL) {
 #   -941/-56/-7.5 m), while de_boyer_montegut_etal_2023's mld_dr003 is a *positive* depth-below-surface
 #   (min/mean/max = 10/55/311 m) -- same units (m), opposite sign convention. Flipped via `fesom_fac`
 #   (applied to the model side, so the report keeps everyone else's positive-depth convention).
+# names of the datasets in the labels
+data_name <- function(p) {
+    if (p$dataset == "cmems") return(c(ARC_009_124_CHL="CMEMS ARC", GLO_009_104_CHL="GlobColour", GLO_009_108_CHL="ESA-CCI v6", GLO_009_104_PP="GlobColour")[[p$varname]])
+    if (p$dataset == "lewis_etal_2022") return(if (identical(p$file_match, "^A_")) "AOReg.emp MODIS" else "AOReg.emp SeaWiFS")
+    if (p$dataset == "buitenhuis_etal_2013") return(paste0("MAREDAT ", p$file_match))
+    c(de_boyer_montegut_etal_2023="de Boyer Mont\u00e9gut 2023", glodap="GLODAPv2.2016b", gregor_and_fay_2021="SeaFlux",
+      huang_etal_2022="Huang 2022", keppler_etal_2020="MOBO-DIC", steele_etal_2001="PHC3", woa="WOA23")[[p$dataset]]
+}
+model_name <- function(p) paste0("AWI-ESM3 ", p$fesom_var)
+
 pairs <- list(
     # buitenhuis_etal_2013 (PFT biomass) vs REcoM PFT carbon; Phaeocystis has no REcoM PFT counterpart
     list(dataset="buitenhuis_etal_2013", varname="BIOMASS", file_match="Diatoms",          fesom_var="DiaC",    fac=1/12.01), # obs ug/L (=mg C/m3) -> FESOM mmol C/m3
@@ -193,15 +204,17 @@ pairs <- list(
 fac_of <- function(p) if (is.null(p$fac)) 1 else p$fac
 fesom_fac_of <- function(p) if (is.null(p$fesom_fac)) 1 else p$fesom_fac # like `fac`, but applied to the model side
 
-# same `datas`/other fields as `job`, but `anom`=T and tagged "_anom" -- see plot.r's header for `anom`
-anom_job_of <- function(job) {
-    job$anom <- TRUE
-    job$fout <- sub("\\.png$", "_anom.png", job$fout)
-    job
+# colorbar label of the anomaly plots: the data are in the units of the model after `fac`
+anomaly_zlab_of <- function(p, model_f) {
+    units <- var_units(model_f, nc_var_dims(model_f)$varname)
+    units <- sub("^\\[(.*)\\]$", "\\1", units)
+    if (nzchar(units)) paste0("anomaly [", units, "]") else "anomaly"
 }
 
 plots <- list()
+lines_1d <- list() # per model variable and mode: all obs and the model, for 1 line plot
 for (p in pairs) {
+    anom_col <- if (p$fesom_var == "temp") F else NULL # sequential colors for temperature, although it has positive and negative values
 
     # --- maps (timmean): obs left, FESOM/REcoM (remapped onto the obs grid) right ---
     ddir <- file.path(pathpost, p$dataset, "timmean", p$varname)
@@ -218,11 +231,10 @@ for (p in pairs) {
                 model_f <- remap_fesom_map(p$fesom_var, f)
                 if (!is.null(model_f)) {
                     fout <- file.path(pathplot, "comparison", p$dataset, "timmean", p$varname, paste0(label, "_vs_", p$fesom_var, ".png"))
-                    job <- list(datas=list(list(fin=f, label=paste(p$dataset, p$varname), fac=fac_of(p)),
-                                            list(fin=model_f, label=p$fesom_var, fac=fesom_fac_of(p))), fout=fout,
-                                zlab=map_zlab(p, model_f))
-                    plots[[length(plots)+1]] <- job
-                    plots[[length(plots)+1]] <- anom_job_of(job)
+                    plots[[length(plots)+1]] <- list(datas=list(list(fin=f, label=data_name(p), fac=fac_of(p)),
+                                                                 list(fin=model_f, label=model_name(p), fac=fesom_fac_of(p))),
+                                                      anomaly=T, same_units=T, anomaly_zlab=anomaly_zlab_of(p, model_f), zlab=map_zlab(p, model_f),
+                                                      zlim_quantiles=c(0.1, 0.9), anom_colorbar=anom_col, fout=fout)
                 }
             } else if (ndims == 3) {
                 depth_i <- which(survive & !is.na(match(dd$names, known_depth_dimnames)))
@@ -242,12 +254,11 @@ for (p in pairs) {
                         if (is.null(model_f)) next
                         dtag <- paste0(dd$names[depth_i], round(dd$vals[[depth_i]][k]))
                         fout <- file.path(pathplot, "comparison", p$dataset, "timmean", p$varname, paste0(label, "_", dtag, "_vs_", p$fesom_var, ".png"))
-                        job <- list(datas=list(
-                            list(fin=f, label=paste(p$dataset, p$varname), index=setNames(list(k), dd$names[depth_i]), fac=fac_of(p)),
-                            list(fin=model_f, label=p$fesom_var, fac=fesom_fac_of(p))), fout=fout,
-                            zlab=map_zlab(p, model_f))
-                        plots[[length(plots)+1]] <- job
-                        plots[[length(plots)+1]] <- anom_job_of(job)
+                        plots[[length(plots)+1]] <- list(datas=list(
+                            list(fin=f, label=data_name(p), index=setNames(list(k), dd$names[depth_i]), fac=fac_of(p)),
+                            list(fin=model_f, label=model_name(p), fac=fesom_fac_of(p))), anomaly=T, same_units=T,
+                            anomaly_zlab=anomaly_zlab_of(p, model_f), zlab=map_zlab(p, model_f),
+                            zlim_quantiles=c(0.1, 0.9), anom_colorbar=anom_col, fout=fout)
                     }
                     nc_close(nc)
                 }
@@ -285,20 +296,32 @@ for (p in pairs) {
                 message("skip \"", f, "\" (", ndims, " remaining dim(s), plot.r draws 1 or 2)")
                 next
             }
+            if (ndims == 1) { # collected: 1 plot per model variable and mode, see below
+                key <- paste0(p$fesom_var, "_", mode_name)
+                if (is.null(lines_1d[[key]])) lines_1d[[key]] <- list(var=p$fesom_var, mode_name=mode_name, model_f=model_f, model_fac=fesom_fac_of(p), model_index=model_index,
+                                                                      model_label=model_name(p), ylab=map_zlab(p, model_f), datas=list())
+                lines_1d[[key]]$datas[[length(lines_1d[[key]]$datas)+1]] <- list(fin=f, label=data_name(p), fac=fac_of(p))
+                next
+            }
             label <- tools::file_path_sans_ext(basename(f))
             fout <- file.path(pathplot, "comparison", p$dataset, mode_name, p$varname, paste0(label, "_vs_", p$fesom_var, ".png"))
-            model_data <- list(fin=model_f, label=p$fesom_var)
+            model_data <- list(fin=model_f, label=model_name(p), fac=fesom_fac_of(p))
             if (!is.null(model_index)) model_data$index <- model_index
-            job <- list(datas=list(list(fin=f, label=paste(p$dataset, p$varname), fac=fac_of(p)), model_data), fout=fout)
-            if (mode_name == "fldmean" && ndims == 1) job$mode <- "fldmean"
-            plots[[length(plots)+1]] <- job
-            # anomaly (model - obs) panel: only for the seasonal-cycle variants, and only when both
-            # sides are still 2-dim (ndims==1 i.e. plain fldmean has no 2nd axis to interpolate against)
-            if (mode_name %in% c("zonmean_ymon", "fldmean_ymon") && ndims == 2) {
-                plots[[length(plots)+1]] <- anom_job_of(job)
-            }
+            plots[[length(plots)+1]] <- list(datas=list(list(fin=f, label=data_name(p), fac=fac_of(p)), model_data),
+                                             anomaly=T, same_units=T, anomaly_zlab=anomaly_zlab_of(p, model_f), zlab=map_zlab(p, model_f),
+                                             anom_colorbar=anom_col, fout=fout)
         }
     }
+}
+
+# 1 line plot with all obs of a model variable; model in black. `fac` of `pairs` brings all obs to the units of the model
+for (l in lines_1d) {
+    model_data <- list(fin=l$model_f, label=l$model_label, fac=l$model_fac, col="black", lwd=2)
+    if (!is.null(l$model_index)) model_data$index <- l$model_index
+    job <- list(datas=c(l$datas, list(model_data)), ylab=l$ylab,
+                fout=file.path(pathplot, "comparison", "all_data", l$mode_name, l$var, paste0(l$var, "_", l$mode_name, "_all_data_vs_model.png")))
+    if (l$mode_name == "fldmean") job$mode <- "fldmean"
+    plots[[length(plots)+1]] <- job
 }
 
 message("--> ", length(plots), " comparison plot(s) built from ", length(pairs), " pairing(s)")
